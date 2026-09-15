@@ -2,11 +2,11 @@
 
 **把小红书网页版的原图、GIF 和实况照片，直接存进 Mac「照片」App。**
 
-预览、勾选、一键导入。导入后经 iCloud 照片自动同步到 iPhone 和其他 Apple 设备。
-
 [中文](#中文) · [English](#english)
 
-![架构图：扩展 → Native Messaging → 本机连接器 → Photos.app](docs/architecture.png)
+![演示：在小红书笔记页打开扩展，勾选图片，一键导入](docs/demo.gif)
+
+预览、勾选、一键导入。导入后经 iCloud 照片自动同步到 iPhone 和其他 Apple 设备。
 
 ---
 
@@ -31,6 +31,8 @@ Chrome 扩展不能直接写入 macOS 照片图库，所以走 Chrome 官方的 
 ```
 扩展弹窗 → Native Messaging → 本机照片连接器 → Photos.app
 ```
+
+![架构图：扩展 → Native Messaging → 本机连接器 → Photos.app](docs/architecture.png)
 
 连接器只接受来自本扩展固定 ID 的消息，只允许下载小红书及其图片 CDN 的地址。
 
@@ -146,6 +148,8 @@ A Chrome extension cannot write to the macOS photo library directly, so this use
 ```
 Extension popup → Native Messaging → Local photo connector → Photos.app
 ```
+
+![Architecture: extension → Native Messaging → local connector → Photos.app](docs/architecture.png)
 
 The connector only accepts messages from this extension's fixed ID, and only downloads from Xiaohongshu and its image CDNs.
 
