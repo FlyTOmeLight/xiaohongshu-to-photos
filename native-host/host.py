@@ -30,7 +30,9 @@ on run argv
   repeat with filePath in argv
     set end of filesToImport to POSIX file (contents of filePath)
   end repeat
-  tell application "Photos" to activate
+  -- Do not "activate" Photos here. Stealing focus closes the Chrome popup
+  -- before it can report the result, so the user sees nothing at all.
+  -- The import itself does not need the app to be frontmost.
   tell application "Photos" to set importedItems to import (filesToImport)
   return count of importedItems
 end run
