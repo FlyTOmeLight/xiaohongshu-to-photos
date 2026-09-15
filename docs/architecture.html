@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  :root{
+    --ink:#1c1b22;
+    --muted:#6b6a76;
+    --line:#d9d7e0;
+    --web:#3b6ef5;
+    --ext:#f2555a;
+    --local:#0f9d70;
+    --photos:#8a4de0;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{
+    width:1000px;
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue","Segoe UI",sans-serif;
+    color:var(--ink);
+    background:linear-gradient(180deg,#fbfaff 0%,#f4f2fb 100%);
+    -webkit-font-smoothing:antialiased;
+  }
+  .page{padding:44px 56px 40px}
+
+  /* ---------- header ---------- */
+  header{display:flex;align-items:baseline;gap:14px;margin-bottom:6px}
+  h1{font-size:27px;letter-spacing:-.3px;font-weight:700}
+  .sub{font-size:13.5px;color:var(--muted);letter-spacing:.2px}
+  .rule{height:1px;background:linear-gradient(90deg,var(--line),transparent);margin:18px 0 30px}
+
+  /* ---------- nodes ---------- */
+  .node{
+    border-radius:14px;background:#fff;padding:15px 20px;
+    border:1px solid var(--line);
+    box-shadow:0 1px 2px rgba(28,27,34,.05),0 6px 16px -10px rgba(28,27,34,.22);
+    border-left:4px solid var(--c);
+    position:relative;
+  }
+  .node .row{display:flex;align-items:baseline;gap:10px}
+  .node .zh{font-size:16.5px;font-weight:650}
+  .node .en{font-size:11.5px;color:var(--muted);letter-spacing:.3px}
+  .node .tag{
+    margin-left:auto;font-size:10.5px;font-weight:600;letter-spacing:.6px;
+    color:var(--c);background:color-mix(in srgb,var(--c) 10%,#fff);
+    border:1px solid color-mix(in srgb,var(--c) 26%,#fff);
+    padding:3px 9px;border-radius:999px;white-space:nowrap;
+  }
+  .node .note{font-size:12.5px;color:var(--muted);margin-top:5px;line-height:1.5}
+
+  .web{--c:var(--web)}
+  .ext{--c:var(--ext)}
+  .local{--c:var(--local)}
+  .photos{--c:var(--photos)}
+
+  /* ---------- arrows ---------- */
+  .arrow{display:flex;justify-content:center;position:relative;height:56px}
+  .arrow::before{
+    content:"";position:absolute;top:0;bottom:11px;width:2px;
+    background:var(--line);
+  }
+  .arrow::after{
+    content:"";position:absolute;bottom:0;
+    border-left:6px solid transparent;border-right:6px solid transparent;
+    border-top:9px solid var(--line);
+  }
+  .arrow .label{
+    align-self:center;position:relative;z-index:1;
+    background:linear-gradient(180deg,#fbfaff 0%,#f4f2fb 100%);
+    padding:3px 12px;font-size:12px;color:var(--muted);
+    border:1px solid var(--line);border-radius:999px;white-space:nowrap;
+    box-shadow:0 1px 0 #fff inset;
+  }
+
+  /* ---------- branch ---------- */
+  .branch{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+  .branch .node{padding:14px 18px}
+  .branch .zh{font-size:15px}
+
+  /* ---------- footer ---------- */
+  .foot{
+    margin-top:30px;padding-top:16px;border-top:1px dashed var(--line);
+    display:flex;justify-content:space-between;align-items:center;
+    font-size:12px;color:var(--muted);
+  }
+  .pills{display:flex;gap:8px}
+  .pill{
+    border:1px solid var(--line);border-radius:999px;padding:4px 11px;
+    background:#fff;font-size:11.5px;
+  }
+  .pill b{color:var(--local);font-weight:650}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <h1>红薯收藏夹</h1>
+    <span class="sub">XHS Image Saver · 架构 Architecture</span>
+  </header>
+  <div class="rule"></div>
+
+  <div class="node web">
+    <div class="row">
+      <span class="zh">小红书网页版</span>
+      <span class="en">xiaohongshu.com</span>
+      <span class="tag">WEB</span>
+    </div>
+    <div class="note">图文笔记页 · 原图 / GIF / 实况照片</div>
+  </div>
+
+  <div class="arrow"><span class="label">解析页面 state · parse <code>window.__INITIAL_STATE__</code></span></div>
+
+  <div class="node ext">
+    <div class="row">
+      <span class="zh">Chrome 扩展</span>
+      <span class="en">popup.js + content.js</span>
+      <span class="tag">MV3</span>
+    </div>
+    <div class="note">预览勾选 → 主世界注入 + 内容脚本双路读取，取最优结果</div>
+  </div>
+
+  <div class="arrow"><span class="label">Native Messaging · 仅接受固定扩展 ID</span></div>
+
+  <div class="node local">
+    <div class="row">
+      <span class="zh">本机照片连接器</span>
+      <span class="en">native-host/host.py</span>
+      <span class="tag">LOCAL</span>
+    </div>
+    <div class="note">
+      剥离 CDN 缩放 / 格式转换 / 水印后缀 → 下载原始上传文件 →<br>
+      按文件签名嗅探真实格式 · 域名白名单校验 · 无远程服务器与遥测
+    </div>
+  </div>
+
+  <div class="arrow"><span class="label">下载原始文件 · download originals</span></div>
+
+  <div class="branch">
+    <div class="node local">
+      <div class="row">
+        <span class="zh">实况照片配对</span>
+        <span class="en">live-photo-helper</span>
+      </div>
+      <div class="note">静态帧转 JPEG，与 MOV 写入同一 Content Identifier</div>
+    </div>
+    <div class="node local">
+      <div class="row">
+        <span class="zh">普通图片 / GIF</span>
+        <span class="en">direct import</span>
+      </div>
+      <div class="note">GIF 保留动画，不转静态 JPG</div>
+    </div>
+  </div>
+
+  <div class="arrow"><span class="label">批量导入 · batch import</span></div>
+
+  <div class="node photos">
+    <div class="row">
+      <span class="zh">macOS「照片」</span>
+      <span class="en">Photos.app</span>
+      <span class="tag">iCloud</span>
+    </div>
+    <div class="note">导入后经 iCloud 照片同步到 iPhone 与其它 Apple 设备</div>
+  </div>
+
+  <div class="foot">
+    <div class="pills">
+      <span class="pill">无远程服务器 <b>no server</b></span>
+      <span class="pill">无遥测 <b>no telemetry</b></span>
+    </div>
+    <span>仅保存你有权使用的图片 · please respect creators' rights</span>
+  </div>
+
+</div>
+</body>
+</html>

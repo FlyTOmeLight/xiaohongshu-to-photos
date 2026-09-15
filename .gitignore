@@ -1,0 +1,13 @@
+# macOS
+.DS_Store
+._*
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Shortcuts build output (regenerate with build_shortcut.py)
+*.unsigned.shortcut
+
+# Native host build output (compiled by install.command)
+native-host/live-photo-helper

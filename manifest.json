@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "红薯收藏夹",
+  "description": "从小红书网页版选择原图、GIF 和实况照片，并直接保存到 macOS“照片”App。",
+  "version": "1.2.7",
+  "minimum_chrome_version": "109",
+  "permissions": [
+    "activeTab",
+    "nativeMessaging",
+    "scripting"
+  ],
+  "host_permissions": [
+    "*://*.xiaohongshu.com/*",
+    "*://*.xhscdn.com/*",
+    "*://*.xhscdn.net/*"
+  ],
+  "action": {
+    "default_title": "保存小红书图片",
+    "default_popup": "popup.html"
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAmDlTejd2xAeNFVZ6waMCeaU8SNRRXXsKuJ3y+Bdah1DFABN9I37JGtVpsAw/bwEa2h7ziToKT/rUGGkemBU72hPNuapcLgjLOqtlwezviXVISFEVhA7EqKoaNRfWqIARTvEbwwvuoz2p7wVh4OG40RjHtktwyXzCiRjGU6ejSHESmZ5JvC7anNcS9H0rIvwS4yemOShA0cQVZOaToUmZ3/GioF+zOqpUOuFl29+IE3FFpQmuW1/PpSo+/SGmFhHNL6GQLr+iHjmvNrJiosi6+7NvQE1ya5Nyu7aNpuHsoI0LbWHWZwJ9xsh7GKXJ66Gs/gk3+AoBD38/C7vFlBPLjwIDAQAB",
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.xiaohongshu.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

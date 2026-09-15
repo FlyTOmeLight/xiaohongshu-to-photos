@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>红薯收藏夹</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand-mark" aria-hidden="true">
+          <span></span><span></span>
+        </div>
+        <div>
+          <h1>红薯收藏夹</h1>
+          <p>把喜欢的瞬间带回 Mac</p>
+        </div>
+        <button id="refreshButton" class="icon-button" type="button" aria-label="重新读取">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M18.2 9A7 7 0 0 0 6.7 6.7L4 9m16 6-2.7 2.3A7 7 0 0 1 5.8 15"/></svg>
+        </button>
+      </header>
+
+      <section id="loadingState" class="state-card loading-state" aria-live="polite">
+        <div class="loader"><i></i><i></i><i></i></div>
+        <h2>正在寻找图片</h2>
+        <p>稍等一下，正在读取当前笔记…</p>
+      </section>
+
+      <section id="emptyState" class="state-card hidden" aria-live="polite">
+        <div class="state-illustration">⌁</div>
+        <h2 id="emptyTitle">这里还没有图片</h2>
+        <p id="emptyMessage">请打开一篇小红书图文笔记，再点一次扩展。</p>
+        <button id="retryButton" class="secondary-button" type="button">重新读取</button>
+      </section>
+
+      <section id="galleryState" class="gallery hidden">
+        <div class="note-info">
+          <p id="noteTitle" class="note-title">当前笔记</p>
+          <div class="selection-row">
+            <span id="imageCount">找到 0 张图片</span>
+            <button id="toggleAllButton" type="button">取消全选</button>
+          </div>
+        </div>
+        <div id="imageGrid" class="image-grid"></div>
+      </section>
+
+      <footer id="actionBar" class="action-bar hidden">
+        <div class="destination">
+          <span class="photos-dot" aria-hidden="true"></span>
+          <div>
+            <strong>添加到“照片”</strong>
+            <small>原图、GIF、实况 · 可同步 iCloud</small>
+          </div>
+        </div>
+        <button id="saveButton" class="save-button" type="button">
+          <span id="saveButtonLabel">导入照片</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 19h14"/></svg>
+        </button>
+      </footer>
+
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>
