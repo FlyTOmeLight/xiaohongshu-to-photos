@@ -81,8 +81,11 @@ class ProcessLivePhotoTests(MediaTestCase):
         self.assertEqual(result["items"][0]["kind"], "live")
         self.assertEqual(result["items"][0]["sourceFormat"], "webp")
         self.assertEqual(result["items"][0]["format"], "jpg")
-        self.assertEqual(imported_paths, [jpeg_path, mov_path])
-        pairer.assert_called_once_with(jpeg_path, mov_path)
+        self.assertEqual(imported_paths[0], jpeg_path)
+        self.assertEqual(imported_paths[1].suffix, ".mov")
+        self.assertNotEqual(imported_paths[1], mov_path)
+        pairer.assert_called_once_with(*imported_paths)
+        self.assertFalse(imported_paths[1].parent.exists())
 
     def test_missing_video_url_is_recovered_from_the_note_page(self):
         image_url = "https://sns-img-bd.xhscdn.com/a/notes_pre_post/live_file_123!format/webp"
@@ -190,7 +193,7 @@ class DestinationTests(MediaTestCase):
 
         def copy_until_full(source, destination):
             original_copy(source, destination)
-            if source == mov:
+            if Path(destination).name == "01.mov":
                 raise OSError("磁盘已满")
 
         with (

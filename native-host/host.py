@@ -313,9 +313,16 @@ def live_video_map_from_page(page_url: str) -> dict[str, list[str]]:
 
 def persist_image(data: bytes, image_format: str) -> Path:
     descriptor, filename = tempfile.mkstemp(prefix="rednote_", suffix=f".{image_format}")
-    with os.fdopen(descriptor, "wb") as file:
-        file.write(data)
-    return Path(filename)
+    try:
+        with os.fdopen(descriptor, "wb") as file:
+            file.write(data)
+        return Path(filename)
+    except Exception:
+        with contextlib.suppress(OSError):
+            os.close(descriptor)
+        with contextlib.suppress(OSError):
+            Path(filename).unlink()
+        raise
 
 
 def download_image(raw_url: str) -> tuple[Path, str, str]:
@@ -367,29 +374,22 @@ def convert_live_image_to_jpeg(image_path: Path) -> Path:
     descriptor, filename = tempfile.mkstemp(prefix="rednote_live_", suffix=".jpg")
     os.close(descriptor)
     output_path = Path(filename)
-    result = subprocess.run(
-        [
-            "/usr/bin/sips",
-            "-s", "format", "jpeg",
-            "-s", "formatOptions", "best",
-            str(image_path),
-            "--out", str(output_path),
-        ],
-        capture_output=True,
-        text=True,
-        timeout=120,
-        check=False,
-    )
-    if result.returncode != 0:
+    try:
+        result = subprocess.run(
+            ["/usr/bin/sips", "-s", "format", "jpeg", "-s", "formatOptions", "best",
+             str(image_path), "--out", str(output_path)],
+            capture_output=True, text=True, timeout=120, check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError((result.stderr or result.stdout or "WebP 转 JPEG 失败").strip())
+        with output_path.open("rb") as file:
+            if sniff_format(file.read(16)) != "jpg":
+                raise RuntimeError("Live 静态帧没有成功转换为 JPEG")
+        return output_path
+    except Exception:
         with contextlib.suppress(OSError):
             output_path.unlink()
-        raise RuntimeError((result.stderr or result.stdout or "WebP 转 JPEG 失败").strip())
-    with output_path.open("rb") as file:
-        if sniff_format(file.read(16)) != "jpg":
-            with contextlib.suppress(OSError):
-                output_path.unlink()
-            raise RuntimeError("Live 静态帧没有成功转换为 JPEG")
-    return output_path
+        raise
 
 
 def import_to_photos(paths: list[Path], album_id: str = "") -> tuple[bool, int, str]:
@@ -449,6 +449,7 @@ def process(message: dict) -> dict:
         return {"ok": False, "error": "没有有效的小红书图片地址"}
 
     cleanup_paths: list[Path] = []
+    pairing_dirs: list[Path] = []
     import_paths: list[Path] = []
     downloaded: list[dict] = []
     failures: list[str] = []
@@ -497,27 +498,30 @@ def process(message: dict) -> dict:
                 is_live_item = item.get("kind") == "live" or bool(video_urls)
                 if is_live_item:
                     last_live_error: Exception | None = None
-                    if image_format not in {"jpg", "heic"}:
-                        try:
-                            import_image_path = convert_live_image_to_jpeg(path)
-                            import_image_format = "jpg"
-                            cleanup_paths.append(import_image_path)
-                        except Exception as error:
-                            last_live_error = error
-
                     paired_video_path: Path | None = None
-                    if last_live_error is None:
+                    if video_urls:
+                        pair_dir = Path(tempfile.mkdtemp(prefix="rednote_pair_"))
+                        pairing_dirs.append(pair_dir)
                         for video_url in video_urls:
                             try:
-                                video_path, video_format = download_video(video_url)
+                                video_path, _ = download_video(video_url)
                                 cleanup_paths.append(video_path)
-                                prepare_live_photo(import_image_path, video_path)
-                                paired_video_path = video_path
+                                # The helper rewrites files. Preserve originals for fallback.
+                                pair_image = pair_dir / f"image.{image_format}"
+                                pair_video = pair_dir / "video.mov"
+                                shutil.copyfile(path, pair_image)
+                                shutil.copyfile(video_path, pair_video)
+                                if image_format not in {"jpg", "heic"}:
+                                    pair_image = convert_live_image_to_jpeg(pair_image)
+                                    cleanup_paths.append(pair_image)
+                                prepare_live_photo(pair_image, pair_video)
+                                import_image_path = pair_image
+                                import_image_format = pair_image.suffix.lstrip(".")
+                                paired_video_path = pair_video
                                 media_kind = "live"
                                 break
                             except Exception as error:
                                 last_live_error = error
-                                continue
                     if media_kind != "live":
                         # No usable video: keep the still as a normal photo instead of
                         # failing the item, and report it so the popup can say so.
@@ -582,6 +586,8 @@ def process(message: dict) -> dict:
         for path in cleanup_paths:
             with contextlib.suppress(OSError):
                 path.unlink()
+        for directory in pairing_dirs:
+            shutil.rmtree(directory)
 
 
 def main() -> None:
