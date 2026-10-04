@@ -159,7 +159,7 @@ class DestinationTests(MediaTestCase):
                 importer.assert_not_called()
                 exported = Path(result["folderPath"])
                 self.assertEqual(exported.parent, Path(directory))
-                self.assertEqual({path.name for path in exported.iterdir()}, {"01.gif", "02.jpg", "02.mov"})
+                self.assertEqual({path.name for path in exported.iterdir()}, {"01.gif", "02.jpg", "02.mov", "source.json"})
                 self.assertEqual((exported / "01.gif").read_bytes(), b"test")
                 self.assertFalse(any(path.exists() for path in (gif, jpeg, mov)))
                 results.append(exported)

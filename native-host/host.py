@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import contextlib
+from datetime import datetime, timezone
 import json
 import os
 import re
@@ -642,6 +643,24 @@ def process(message: dict, on_progress=None) -> dict:
                                  if item["index"] in fallback_details]
         quality_details = [f"第 {item['index']} 张：原图候选不可用，已保存页面版本"
                            for item in downloaded if item['quality'] == 'page']
+        source_warning = ""
+        if export_folder:
+            source = {
+                "schemaVersion": 1, "exportedAt": datetime.now(timezone.utc).isoformat(),
+                "pageUrl": message.get("pageUrl", ""), "title": message.get("title", ""),
+                "items": [{**item, "files": [f"{item['index']:02d}.{item['format']}"]
+                          + ([f"{item['index']:02d}.mov"] if item['kind'] == 'live' else [])}
+                          for item in downloaded],
+                "failedIndices": failed_indices, "cancelled": CANCELLED.is_set(),
+            }
+            pending = export_folder / ".source.json.tmp"
+            try:
+                pending.write_text(json.dumps(source, ensure_ascii=False, indent=2), encoding="utf-8")
+                pending.replace(export_folder / "source.json")
+            except OSError as error:
+                source_warning = f"图片已保存，来源记录写入失败：{error}"
+            finally:
+                pending.unlink(missing_ok=True)
         return {
             "ok": True,
             "saved": saved_count,
@@ -654,6 +673,7 @@ def process(message: dict, on_progress=None) -> dict:
             "liveFallback": len(live_fallback_details),
             "liveFallbackDetails": live_fallback_details,
             "qualityFallbackDetails": quality_details,
+            "sourceWarning": source_warning,
             "items": downloaded,
         }
     finally:

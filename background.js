@@ -72,6 +72,19 @@ async function runJob(payload) {
   if (result.ok && payload.action === "listAlbums" && Array.isArray(result.albums)) {
     updates.albums = result.albums;
   }
+  if (payload.action === "save" && result.saved > 0) {
+    try {
+      const { saveHistory = [] } = await chrome.storage.local.get("saveHistory");
+      await chrome.storage.local.set({ saveHistory: [{
+        savedAt: new Date().toISOString(), pageUrl: payload.pageUrl, title: payload.title,
+        destination: payload.destination, albumName: payload.albumName,
+        folderPath: result.folderPath,
+        items: (result.items || []).map(({ index, kind, format, quality }) => ({ index, kind, format, quality }))
+      }, ...saveHistory].slice(0, 100) });
+    } catch (error) {
+      result.historyWarning = `图片已保存，历史记录写入失败：${error.message}`;
+    }
+  }
   await chrome.storage.session.set(updates);
   return result;
 }

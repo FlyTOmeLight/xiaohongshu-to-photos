@@ -87,3 +87,30 @@ class SaveResultTests(MediaTestCase):
                     self.assertEqual(len(result['qualityFallbackDetails']), int(transformed and not failed_import))
                     if result['qualityFallbackDetails']:
                         self.assertIn('第 4 张', result['qualityFallbackDetails'][0])
+
+    def test_export_source_records_only_successful_resources(self):
+        import json
+        image = self.temporary_file('.gif')
+        with (tempfile.TemporaryDirectory() as directory,
+              mock.patch.object(host, 'download_image', return_value=(image, self.image_url, 'gif'))):
+            result = host.process({'destination': 'folder', 'folderPath': directory,
+                                   'pageUrl': 'https://www.xiaohongshu.com/explore/current123', 'title': '来源测试',
+                                   'images': [{'index': 2, 'url': None}, {'index': 7, 'url': self.image_url}]})
+            source = json.loads((Path(result['folderPath']) / 'source.json').read_text())
+            self.assertEqual(source['title'], '来源测试')
+            self.assertIn('current123', source['pageUrl'])
+            self.assertEqual(source['failedIndices'], [2])
+            self.assertEqual(source['items'][0]['files'], ['07.gif'])
+            self.assertEqual(source['items'][0]['index'], 7)
+
+    def test_source_write_failure_keeps_saved_media_and_reports_warning(self):
+        image = self.temporary_file('.gif')
+        with (tempfile.TemporaryDirectory() as directory,
+              mock.patch.object(host, 'download_image', return_value=(image, self.image_url, 'gif')),
+              mock.patch.object(Path, 'write_text', side_effect=OSError('磁盘已满'))):
+            result = host.process({'destination': 'folder', 'folderPath': directory,
+                                   'images': [{'url': self.image_url}]})
+            self.assertTrue(result['ok'])
+            self.assertEqual(result['saved'], 1)
+            self.assertIn('来源记录写入失败', result['sourceWarning'])
+            self.assertEqual({p.name for p in Path(result['folderPath']).iterdir()}, {'01.gif'})

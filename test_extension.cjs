@@ -50,7 +50,14 @@ function extension({ statusResult = { ok: true, protocolVersion: 3 } } = {}) {
   const storage = {
     local: {
       get: async () => structuredClone(localData),
-      set: async (values) => Object.assign(localData, structuredClone(values))
+      set: async (values) => {
+        const changes = {};
+        for (const [key, value] of Object.entries(values)) {
+          changes[key] = { oldValue: localData[key], newValue: structuredClone(value) };
+          localData[key] = structuredClone(value);
+        }
+        for (const listener of listeners) listener(changes, "local");
+      }
     },
     session: {
       get: async () => structuredClone(data),
@@ -347,4 +354,24 @@ test('a reopened popup can stop a running native save without disconnecting it',
   app.ports[0].reply({ ok: true, saved: 1, cancelled: true, failedIndices: [2] });
   await until(() => !app.data.connectorJob.busy);
   assert.match(popup.controls.resultMessage.textContent, /已保留/);
+});
+
+test('successful history is bounded, detects repeated indices, and can be cleared', async () => {
+  const app = extension();
+  app.localData.saveHistory = Array.from({ length: 100 }, () => ({ savedAt: new Date().toISOString(),
+    pageUrl: 'https://www.xiaohongshu.com/explore/other', title: 'Old', items: [] }));
+  const popup = app.openPopup();
+  await until(() => popup.controls.imageGrid.children.length === 2);
+  void popup.controls.saveButton.click();
+  await until(() => app.ports.length === 1);
+  app.ports[0].reply({ ok: true, saved: 1, failedIndices: [2], items: [{ index: 1, kind: 'image', format: 'jpg' }] });
+  await until(() => !app.data.connectorJob.busy);
+  assert.equal(app.localData.saveHistory.length, 100);
+  assert.equal(app.localData.saveHistory[0].pageUrl, app.note.url);
+  assert.deepEqual(Array.from(app.localData.saveHistory[0].items, (item) => item.index), [1]);
+  assert.match(popup.controls.duplicateHint.textContent, /1 张曾保存/);
+  assert.equal(popup.controls.historyList.children.length, 100);
+  await popup.controls.clearHistoryButton.click();
+  assert.equal(app.localData.saveHistory.length, 0);
+  assert.equal(popup.controls.duplicateHint.classList.contains('hidden'), true);
 });

@@ -20,6 +20,12 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M18.2 9A7 7 0 0 0 6.7 6.7L4 9m16 6-2.7 2.3A7 7 0 0 1 5.8 15"/></svg>
         </button>
       </header>
+      <details class="history-panel">
+        <summary>保存历史</summary>
+        <p>最近 100 次成功保存，仅保留在此设备。</p>
+        <button id="clearHistoryButton" class="target-button" type="button">清除记录</button>
+        <div id="historyList" class="history-list"></div>
+      </details>
 
       <section id="loadingState" class="state-card loading-state" aria-live="polite">
         <div class="loader"><i></i><i></i><i></i></div>
@@ -37,6 +43,7 @@
       <section id="galleryState" class="gallery hidden">
         <div class="note-info">
           <p id="noteTitle" class="note-title">当前笔记</p>
+          <p id="duplicateHint" class="duplicate-hint hidden"></p>
           <div class="selection-row">
             <span id="imageCount">找到 0 张图片</span>
             <button id="toggleAllButton" type="button">取消全选</button>

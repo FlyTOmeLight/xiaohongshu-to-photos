@@ -24,7 +24,10 @@ const elements = {
   destinationHint: document.querySelector("#destinationHint"),
   result: document.querySelector("#resultMessage"),
   retryFailed: document.querySelector("#retryFailedButton"),
-  stop: document.querySelector("#stopButton")
+  stop: document.querySelector("#stopButton"),
+  history: document.querySelector("#historyList"),
+  clearHistory: document.querySelector("#clearHistoryButton"),
+  duplicateHint: document.querySelector("#duplicateHint")
 };
 
 let note = { title: "小红书笔记", images: [] };
@@ -34,6 +37,40 @@ let busy = false;
 let folderPath = "";
 let sourceTabId;
 let session = {};
+let saveHistory = [];
+
+function noteIdentity(url) {
+  return String(url || "").match(/\/(?:explore|discovery\/item)\/([0-9a-z]+)/i)?.[1] || "";
+}
+
+function renderHistory() {
+  elements.history.replaceChildren();
+  if (!saveHistory.length) elements.history.textContent = "尚无保存记录";
+  for (const record of saveHistory) {
+    const row = document.createElement("p");
+    const link = document.createElement("a");
+    link.textContent = record.title || "小红书笔记";
+    if (/^https?:\/\/([\w-]+\.)*xiaohongshu\.com\//i.test(record.pageUrl || "")) {
+      link.href = record.pageUrl;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+    }
+    const detail = document.createElement("span");
+    detail.textContent = `${new Date(record.savedAt).toLocaleString()} · ${record.items.length} 张 · ${record.destination === "folder" ? record.folderPath : record.albumName || "照片图库"}`;
+    row.append(link, detail);
+    elements.history.append(row);
+  }
+  updateDuplicateHint();
+}
+
+function updateDuplicateHint() {
+  const id = noteIdentity(note.url);
+  const saved = new Set(saveHistory.filter((record) => id && noteIdentity(record.pageUrl) === id)
+    .flatMap((record) => record.items.map((item) => item.index)));
+  const count = note.images.filter((item, index) => selected.has(index) && saved.has(item.index || index + 1)).length;
+  elements.duplicateHint.textContent = count ? `已选图片中有 ${count} 张曾保存。继续保存会再导出一次。` : "";
+  elements.duplicateHint.classList.toggle("hidden", !count);
+}
 
 function bestNoteResult(candidates, tabUrl) {
   const wantedId = String(tabUrl || "").match(/\/(?:explore|discovery\/item)\/([0-9a-z]+)/i)?.[1] || "";
@@ -94,6 +131,7 @@ function showSaveResult(payload, result, toast = false) {
     const summary = `已${local ? "保存" : "导入"} ${result.saved} 张到${target}${failedText}${fallbackText}${qualityText}`;
     elements.result.textContent = [result.cancelled ? "任务已停止，已保存的图片已保留" : "", summary, ...(result.failureDetails || []),
       ...(result.liveFallbackDetails || []), ...(result.qualityFallbackDetails || []),
+      result.sourceWarning, result.historyWarning,
       local ? result.folderPath : ""].filter(Boolean).join("\n");
   }
   elements.result.classList.remove("hidden");
@@ -154,6 +192,7 @@ function setEmpty(title, message) {
 }
 
 function updateSelectionUi() {
+  updateDuplicateHint();
   const count = selected.size;
   elements.count.textContent = `已选 ${count} / ${note.images.length} 张`;
   elements.toggleAll.textContent = count === note.images.length ? "取消全选" : "全部选择";
@@ -287,6 +326,9 @@ async function collect() {
 }
 
 elements.refresh.addEventListener("click", collect);
+elements.clearHistory.addEventListener("click", async () => {
+  await chrome.storage.local.set({ saveHistory: [] });
+});
 elements.stop.addEventListener("click", async () => {
   if (!busy) return;
   await chrome.runtime.sendMessage({ type: "CONNECTOR_CANCEL" });
@@ -420,6 +462,10 @@ elements.save.addEventListener("click", async () => {
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.saveHistory) {
+    saveHistory = changes.saveHistory.newValue || [];
+    renderHistory();
+  }
   if (area !== "session") return;
   for (const [key, change] of Object.entries(changes)) session[key] = change.newValue;
   if (changes.connectorJob || changes.folderPath || changes.albums) applySession();
@@ -429,7 +475,9 @@ async function initialize() {
   const state = await chrome.runtime.sendMessage({ type: "CONNECTOR_STATE" });
   if (!state?.ok) throw new Error(state?.error || "无法读取后台任务状态");
   session = await chrome.storage.session.get(["popupDraft", "folderPath", "albums", "connectorJob"]);
-  const local = await chrome.storage.local.get(["destinationPreferences", "folderPath"]);
+  const local = await chrome.storage.local.get(["destinationPreferences", "folderPath", "saveHistory"]);
+  saveHistory = local.saveHistory || [];
+  renderHistory();
   if (!session.folderPath) session.folderPath = local.folderPath || "";
   const preferences = local.destinationPreferences;
   if (preferences) {

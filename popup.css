@@ -109,6 +109,13 @@ button:focus-visible, select:focus-visible { outline: 2px solid var(--red); outl
 }
 
 .gallery { padding: 3px 18px 330px; }
+.history-panel { margin: 0 18px 12px; font-size: 12px; }
+.history-panel summary { cursor: pointer; min-height: 28px; }
+.history-panel > p, .duplicate-hint { color: #625d58; font-size: 12px; line-height: 1.5; }
+.history-list { max-height: 160px; overflow: auto; overflow-wrap: anywhere; }
+.history-list p { border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+.history-list a { color: var(--red-dark); }
+.history-list span { display: block; margin-top: 5px; line-height: 1.5; color: #625d58; }
 .note-info { padding: 5px 2px 13px; }
 .note-title { margin: 0 0 10px; font-size: 14px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .selection-row { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; }
