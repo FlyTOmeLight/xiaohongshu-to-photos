@@ -33,84 +33,6 @@ let folderPath = "";
 let sourceTabId;
 let session = {};
 
-function collectRuntimeNote() {
-  const state = window.__INITIAL_STATE__;
-  if (!state || typeof state !== "object") return null;
-  const wantedId = location.pathname.match(/\/(?:explore|discovery\/item)\/([0-9a-z]+)/i)?.[1] || "";
-  const validUrl = (value) => {
-    if (typeof value !== "string" || !value.trim()) return "";
-    try {
-      const url = new URL(value, location.href);
-      return /^https?:$/.test(url.protocol) ? url.href : "";
-    } catch {
-      return "";
-    }
-  };
-  const videoUrls = (item) => {
-    const stream = item?.stream || item?.streams || {};
-    const variants = ["h264", "h265", "h266", "av1"].flatMap((codec) => {
-      const value = stream[codec] || stream[codec.toUpperCase()] || [];
-      return Array.isArray(value) ? value : [];
-    });
-    return [...new Set(variants.flatMap((variant) => [
-      variant?.masterUrl || variant?.master_url || variant?.url,
-      ...(variant?.backupUrls || variant?.backup_urls || [])
-    ]).map(validUrl).filter(Boolean))];
-  };
-
-  const seen = new WeakSet();
-  const queue = [state];
-  const candidates = [];
-  let cursor = 0;
-  let inspected = 0;
-  while (cursor < queue.length && inspected < 50000) {
-    const value = queue[cursor++];
-    if (!value || typeof value !== "object" || seen.has(value)) continue;
-    seen.add(value);
-    inspected += 1;
-    const imageList = value.imageList || value.image_list;
-    if (Array.isArray(imageList) && imageList.length) {
-      const noteId = String(value.noteId || value.note_id || "");
-      if (!wantedId || noteId === wantedId) {
-        const count = imageList.reduce((total, item) => total + videoUrls(item).length, 0);
-        candidates.push({ value, score: count * 100 + imageList.length });
-      }
-    }
-    for (const child of Object.values(value)) {
-      if (child && typeof child === "object") queue.push(child);
-    }
-  }
-
-  const noteData = candidates.sort((a, b) => b.score - a.score)[0]?.value;
-  if (!noteData) return null;
-  const images = (noteData.imageList || noteData.image_list).map((item) => {
-    const infoList = item.infoList || item.info_list || [];
-    const preview = infoList.find((value) => value?.imageScene === "WB_PRV") || infoList[0] || {};
-    const original = infoList.find((value) => value?.imageScene === "WB_DFT")
-      || infoList[infoList.length - 1]
-      || infoList[0]
-      || {};
-    const url = validUrl(item.urlDefault || item.url_default || item.urlPre || item.url_pre || original.url || "");
-    const videos = videoUrls(item);
-    const live = Boolean(item.livePhoto || item.live_photo || videos.length);
-    return {
-      url,
-      previewUrl: validUrl(preview.url) || url,
-      width: Number(item.width || original.width) || 800,
-      height: Number(item.height || original.height) || 1000,
-      kind: live ? "live" : /gif/i.test(String(item.imageType || item.image_type || original.format || url)) ? "gif" : "image",
-      videoUrl: videos[0] || "",
-      videoUrls: videos
-    };
-  }).filter((item) => item.url);
-  return images.length ? {
-    noteId: String(noteData.noteId || noteData.note_id || ""),
-    title: String(noteData.title || noteData.desc || document.title || "小红书笔记").trim().slice(0, 80),
-    url: location.href,
-    images
-  } : null;
-}
-
 function bestNoteResult(candidates, tabUrl) {
   const wantedId = String(tabUrl || "").match(/\/(?:explore|discovery\/item)\/([0-9a-z]+)/i)?.[1] || "";
   return candidates.filter((candidate) => candidate?.images?.length).sort((a, b) => {
@@ -240,12 +162,12 @@ function renderGallery() {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "image-item";
-    button.setAttribute("aria-label", `第 ${index + 1} 张图片`);
+    button.setAttribute("aria-label", `第 ${item.index || index + 1} 张图片`);
     button.setAttribute("aria-pressed", "true");
 
     const image = document.createElement("img");
     image.src = item.previewUrl || item.url;
-    image.alt = `笔记图片 ${index + 1}`;
+    image.alt = `笔记图片 ${item.index || index + 1}`;
     image.loading = "lazy";
     image.referrerPolicy = "no-referrer";
 
@@ -254,7 +176,7 @@ function renderGallery() {
     check.textContent = "✓";
     const number = document.createElement("span");
     number.className = "image-number";
-    number.textContent = String(index + 1).padStart(2, "0");
+    number.textContent = String(item.index || index + 1).padStart(2, "0");
 
     const badge = document.createElement("span");
     badge.className = "media-badge";
@@ -297,16 +219,19 @@ async function collect() {
     try {
       response = await chrome.tabs.sendMessage(tab.id, { type: "COLLECT_NOTE_IMAGES" });
     } catch {
-      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["note-parser.js", "content.js"] });
       response = await chrome.tabs.sendMessage(tab.id, { type: "COLLECT_NOTE_IMAGES" });
     }
 
     let runtimeResponse = null;
     try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id }, world: "MAIN", files: ["note-parser.js"]
+      });
       const injected = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         world: "MAIN",
-        func: collectRuntimeNote
+        func: () => globalThis.RednoteParser.fromState(window.__INITIAL_STATE__, location.href, document.title)
       });
       runtimeResponse = injected?.[0]?.result || null;
     } catch {
@@ -428,7 +353,7 @@ elements.save.addEventListener("click", async () => {
       title: note.title,
       pageUrl: note.url,
       images: note.images.flatMap((item, index) => selected.has(index) ? [{
-        index: index + 1,
+        index: item.index || index + 1,
         url: item.url,
         kind: item.kind,
         videoUrl: item.videoUrl || "",

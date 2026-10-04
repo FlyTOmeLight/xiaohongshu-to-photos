@@ -55,93 +55,6 @@
     return entries[0]?.url || "";
   }
 
-  function currentNoteId() {
-    return location.pathname.match(/\/(?:explore|discovery\/item)\/([0-9a-z]+)/i)?.[1] || "";
-  }
-
-  function videoUrlsFromImageItem(item) {
-    const stream = item?.stream || item?.streams || {};
-    const variants = ["h264", "h265", "h266", "av1"].flatMap((codec) => {
-      const value = stream[codec] || stream[codec.toUpperCase()] || [];
-      return Array.isArray(value) ? value : [];
-    });
-    return [...new Set(variants.flatMap((variant) => [
-      variant?.masterUrl || variant?.master_url || variant?.url,
-      ...(variant?.backupUrls || variant?.backup_urls || [])
-    ]).map(validHttpUrl).filter(Boolean))];
-  }
-
-  function normalizeStructuredNote(noteData) {
-    const imageList = noteData?.imageList || noteData?.image_list || [];
-    const images = imageList.map((item) => {
-      const infoList = item.infoList || item.info_list || [];
-      const previewInfo = infoList.find((value) => value?.imageScene === "WB_PRV") || infoList[0] || {};
-      const imageInfo = infoList.find((value) => value?.imageScene === "WB_DFT")
-        || infoList[infoList.length - 1]
-        || infoList[0]
-        || {};
-      const imageUrl = validHttpUrl(
-        item.urlDefault || item.url_default || item.urlPre || item.url_pre || imageInfo.url || ""
-      );
-      const videoUrls = videoUrlsFromImageItem(item);
-      const formatHint = String(item.imageType || item.image_type || imageInfo.format || imageUrl);
-      const isLive = Boolean(item.livePhoto || item.live_photo || videoUrls.length);
-
-      return {
-        url: imageUrl,
-        previewUrl: validHttpUrl(previewInfo.url) || imageUrl,
-        width: Number(item.width || imageInfo.width) || 800,
-        height: Number(item.height || imageInfo.height) || 1000,
-        kind: isLive ? "live" : /gif/i.test(formatHint) ? "gif" : "image",
-        videoUrl: videoUrls[0] || "",
-        videoUrls
-      };
-    }).filter((item) => item.url);
-
-    if (!images.length) return null;
-    return {
-      noteId: String(noteData.noteId || noteData.note_id || ""),
-      title: String(noteData.title || noteData.desc || getTitle()).trim().slice(0, 80),
-      url: location.href,
-      images
-    };
-  }
-
-  function findBestNoteData(root) {
-    if (!root || typeof root !== "object") return null;
-    const wantedId = currentNoteId();
-    const seen = new WeakSet();
-    const candidates = [];
-    const queue = [root];
-    let cursor = 0;
-    let inspected = 0;
-
-    while (cursor < queue.length && inspected < 50000) {
-      const value = queue[cursor++];
-      if (!value || typeof value !== "object" || seen.has(value)) continue;
-      seen.add(value);
-      inspected += 1;
-
-      const imageList = value.imageList || value.image_list;
-      if (Array.isArray(imageList) && imageList.length) {
-        const noteId = String(value.noteId || value.note_id || "");
-        const videoCount = imageList.reduce((total, item) => total + videoUrlsFromImageItem(item).length, 0);
-        const liveCount = imageList.filter((item) => item?.livePhoto || item?.live_photo).length;
-        const idScore = wantedId && noteId === wantedId ? 1000000 : wantedId ? 0 : 1000;
-        candidates.push({ value, score: idScore + videoCount * 100 + liveCount * 10 + imageList.length });
-      }
-
-      for (const child of Object.values(value)) {
-        if (child && typeof child === "object") queue.push(child);
-      }
-    }
-
-    const matching = wantedId
-      ? candidates.filter((candidate) => String(candidate.value.noteId || candidate.value.note_id || "") === wantedId)
-      : candidates;
-    return matching.sort((a, b) => b.score - a.score)[0]?.value || null;
-  }
-
   function collectStructuredNote() {
     const marker = "window.__INITIAL_STATE__=";
     const results = [];
@@ -149,8 +62,7 @@
       const start = stateScript.textContent.indexOf(marker) + marker.length;
       const rawState = stateScript.textContent.slice(start).trim().replace(/;<\/script>.*$/s, "").replace(/;$/, "");
       try {
-        const noteData = findBestNoteData(JSON.parse(rawState.replace(/\bundefined\b/g, "null")));
-        const normalized = normalizeStructuredNote(noteData);
+        const normalized = RednoteParser.fromState(RednoteParser.parseState(rawState), location.href, getTitle());
         if (normalized) results.push(normalized);
       } catch {
         // A different state block may still contain the current note.
@@ -167,13 +79,8 @@
     root.querySelectorAll("video, video source").forEach((element) => {
       urls.push(element.currentSrc, element.src, element.getAttribute("src"));
     });
-    for (const entry of performance.getEntriesByType("resource")) {
-      if (entry.initiatorType === "video" || /(?:sns-video|\/stream\/|\.mp4(?:$|\?))/i.test(entry.name)) {
-        urls.push(entry.name);
-      }
-    }
     return [...new Set(urls.map(validHttpUrl).filter((url) =>
-      /(?:xiaohongshu\.com|xhscdn\.(?:com|net))$/i.test(hostnameOf(url))
+      /(?:^|\.)(?:xiaohongshu\.com|xhscdn\.(?:com|net))$/i.test(hostnameOf(url))
     ))];
   }
 
@@ -187,10 +94,6 @@
       candidates.push({ url: safeUrl, width: width || 800, height: height || 1000, hint });
     };
 
-    document.querySelectorAll('meta[property="og:image"], meta[name="twitter:image"]').forEach((meta) => {
-      add(meta.content, 1600, 2000, "note metadata");
-    });
-
     const detailRoot = document.querySelector([
       ".note-detail-mask",
       '[class*="note-detail-mask"]',
@@ -198,14 +101,15 @@
       ".note-container",
       '[class*="note-container"]'
     ].join(", "));
-    const mediaRoot = detailRoot?.querySelector([
+    if (!RednoteParser.noteIdFromUrl(location.href) || !detailRoot) return [];
+    const mediaRoot = detailRoot.querySelector([
       ".media-container",
       '[class*="media-container"]',
       ".swiper-wrapper",
       '[class*="swiper-wrapper"]',
       '[class*="carousel"]',
       '[class*="gallery"]'
-    ].join(", ")) || detailRoot || document;
+    ].join(", ")) || detailRoot;
     const visibleText = [...mediaRoot.querySelectorAll("span, div")].some((element) =>
       element.children.length === 0
         && /^LIVE$/i.test(element.textContent?.trim() || "")
@@ -249,8 +153,8 @@
         if (!aElement || !bElement) return qualityScore(b) - qualityScore(a);
         return aElement.compareDocumentPosition(bElement) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
       })
-      .slice(0, 30)
       .map(({ url, width, height }, index, array) => ({
+        index: index + 1,
         url,
         width,
         height,

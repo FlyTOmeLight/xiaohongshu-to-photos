@@ -41,6 +41,7 @@ Chrome 扩展不能直接写入 macOS 照片图库，所以走 Chrome 官方的 
 | 扩展界面 | `popup.html` `popup.css` `popup.js` | 列出图片、选择目的地、触发保存 |
 | 后台任务 | `background.js` | 保持本机连接，保存任务状态和结果 |
 | 内容脚本 | `content.js` | 解析笔记页，提取图片与实况视频地址 |
+| 笔记解析 | `note-parser.js` | 共用结构化解析，只选择当前笔记 |
 | 本机连接器 | `native-host/host.py` | 校验地址、回源下载、嗅探格式、导入相簿或导出文件 |
 | 实况配对 | `native-host/live-photo-helper.swift` | 为静态帧与 MOV 写入同一 Content Identifier |
 | 纯快捷指令版 | `ios-shortcut/` | 不装任何东西，用 iPhone 快捷指令存图 |
@@ -170,6 +171,7 @@ The connector only accepts messages from this extension's fixed ID, and only dow
 | Extension UI | `popup.html` `popup.css` `popup.js` | Lists images, selects a destination, starts saving |
 | Background task | `background.js` | Keeps the native connection alive and stores task state and results |
 | Content script | `content.js` | Parses the post page, extracts image and Live Photo video URLs |
+| Note parser | `note-parser.js` | Shared structured parsing restricted to the current note |
 | Native host | `native-host/host.py` | Validates URLs, downloads originals, sniffs formats, imports to albums or exports files |
 | Live Photo pairing | `native-host/live-photo-helper.swift` | Writes one shared Content Identifier into the still and the MOV |
 | Shortcuts-only build | `ios-shortcut/` | Save images from an iPhone Shortcut with nothing installed |

@@ -59,3 +59,9 @@ class SaveResultTests(MediaTestCase):
         self.assertIn('第 2 张：相簿导入失败', result['failureDetails'])
         self.assertEqual([item['index'] for item in result['items']], [5])
         self.assertIn('第 5 张', result['liveFallbackDetails'][0])
+
+    def test_page_video_lookup_preserves_undefined_inside_urls(self):
+        page = '<script>window.__INITIAL_STATE__={"noteId":"current123","value":undefined,"imageList":[{"urlDefault":"https://ci.xiaohongshu.com/undefined-image","stream":{"h264":[{"masterUrl":"https://sns-video-bd.xhscdn.com/undefined-video"}]}}]};</script>'
+        with mock.patch.object(host, 'fetch_url', return_value=page.encode()):
+            result = host.live_video_map_from_page('https://www.xiaohongshu.com/explore/current123')
+        self.assertEqual(result['undefined-image'], ['https://sns-video-bd.xhscdn.com/undefined-video'])

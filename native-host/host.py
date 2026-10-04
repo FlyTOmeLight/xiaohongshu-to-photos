@@ -284,7 +284,8 @@ def live_video_map_from_page(page_url: str) -> dict[str, list[str]]:
     for match in re.finditer(r"window\.__INITIAL_STATE__=(.*?)</script>", page, re.S):
         raw_state = match.group(1).strip().removesuffix(";")
         try:
-            state = json.loads(re.sub(r"\bundefined\b", "null", raw_state))
+            state = json.loads(re.sub(r'"(?:\\.|[^"\\])*"|\bundefined\b',
+                                      lambda match: "null" if match.group() == "undefined" else match.group(), raw_state))
         except json.JSONDecodeError:
             continue
         note_data = find_note_data(state, wanted_id)

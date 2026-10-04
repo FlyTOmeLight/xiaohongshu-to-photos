@@ -27,6 +27,7 @@
         "*://*.xiaohongshu.com/*"
       ],
       "js": [
+        "note-parser.js",
         "content.js"
       ],
       "run_at": "document_idle"
