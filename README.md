@@ -48,17 +48,17 @@ Chrome 扩展不能直接写入 macOS 照片图库，所以走 Chrome 官方的 
 
 ## 安装
 
-需要 macOS、Chrome 109+、Python 3。
+需要 macOS、Chrome 109+、Python 3.10+ 和 Apple 命令行开发工具（包含 Swift 编译器）。缺少开发工具时运行 `xcode-select --install`；缺少 Python 时可通过 Homebrew 运行 `brew install python`。
 
 1. 在 Finder 中打开项目的 `native-host` 文件夹。
 2. 右键 `install.command`，选择「打开」，确认运行。
 3. 在 Chrome 地址栏打开 `chrome://extensions`。
-4. 如果列表里已有旧版「红薯收藏夹」，先移除它。然后点「加载已解压的扩展程序」，选择本项目文件夹。
+4. 开启「开发者模式」，点「加载已解压的扩展程序」，选择本项目文件夹。
 5. 确认扩展 ID 是 `doklnnbjpnipnicbiecefbchkhmckcbm`。
 
-安装脚本会把连接器复制到 `~/Library/Application Support/红薯收藏夹/`，用 `swiftc` 现场编译实况照片组件，并注册 Native Messaging 清单。
+安装脚本先检查依赖，再在临时目录编译实况照片组件。准备成功后才更新 `~/Library/Application Support/红薯收藏夹/` 和 Native Messaging 清单；编译失败不会覆盖已有连接器。连接器使用安装时选定的 Python 解释器启动。
 
-> **升级提示：** 旧版扩展没有固定 ID，仅点刷新可能匹配不上已安装的连接器，所以这次升级需要移除后重新加载。以后更新只需刷新扩展。
+> **更新已有安装：** 更新项目文件，重新运行 `native-host/install.command`，再到 `chrome://extensions` 刷新扩展。只有扩展 ID 与上文不一致时，才需要移除后重新加载。
 
 首次读取相簿或导入时，macOS 会询问 Chrome 是否可以控制「照片」，选择**允许**。
 
@@ -74,9 +74,7 @@ Chrome 扩展不能直接写入 macOS 照片图库，所以走 Chrome 官方的 
 
 扩展在工具栏按钮下方显示小弹窗。系统文件夹选择器可能使弹窗关闭；选好后再次点击扩展即可继续，勾选状态和保存位置会保留。保存任务在后台执行，关闭弹窗后仍能完成，再次打开可查看结果。取消文件夹选择不会开始下载。
 
-**从 1.3.0 升级到 1.3.1：** 到 `chrome://extensions` 刷新扩展即可，本机连接器无需重新安装。
-
-**从 1.2.7 或更早版本升级到 1.3.1：** 重新运行 `native-host/install.command`，再到 `chrome://extensions` 刷新扩展。本机连接器也必须更新，才能读取相簿和保存到文件夹。
+**从已发布版本更新到当前代码：** 必须重新运行 `native-host/install.command` 并刷新扩展。保存前会检查连接器协议；版本不匹配时会提示更新，不会开始下载或导入。后台中断的任务不会自动重试，请先检查保存位置。
 
 导入完成后会提示成功张数。如果某张失败，提示里会说明是哪一张、为什么。
 
@@ -178,17 +176,17 @@ The connector only accepts messages from this extension's fixed ID, and only dow
 
 ## Installation
 
-Requires macOS, Chrome 109+, and Python 3.
+Requires macOS, Chrome 109+, Python 3.10+, and Apple Command Line Tools (including Swift). Run `xcode-select --install` for the developer tools; Python can be installed through Homebrew with `brew install python`.
 
 1. Open the project's `native-host` folder in Finder.
 2. Right-click `install.command`, choose **Open**, and confirm.
 3. Open `chrome://extensions` in Chrome.
-4. If an older "红薯收藏夹" is already listed, remove it first. Then click **Load unpacked** and select the project folder.
+4. Enable **Developer mode**, click **Load unpacked**, and select the project folder.
 5. Confirm the extension ID is `doklnnbjpnipnicbiecefbchkhmckcbm`.
 
-The installer copies the host to `~/Library/Application Support/红薯收藏夹/`, compiles the Live Photo helper on the spot with `swiftc`, and registers the Native Messaging manifest.
+The installer checks dependencies and compiles the Live Photo helper in a temporary directory before updating `~/Library/Application Support/红薯收藏夹/` and the Native Messaging manifest. A compilation failure preserves the existing installation. The connector launches with the Python interpreter selected during installation.
 
-> **Upgrading:** the older extension had no fixed ID, so a plain refresh may not match the installed host. This one upgrade needs a remove-and-reload. Future updates are just a refresh.
+> **Updating an existing installation:** update the project files, re-run `native-host/install.command`, then refresh the extension at `chrome://extensions`. Remove and reload only if its extension ID does not match the one above.
 
 When you first load albums or import, macOS asks whether Chrome may control Photos — choose **Allow**.
 
@@ -204,9 +202,7 @@ For local files, choose **本地文件夹** (Local folder), click **选择文件
 
 The extension opens a small popup below its toolbar button. The system folder picker may close the popup; click the extension again after choosing a folder to continue with your selection and destination preserved. Save tasks run in the background and finish even when the popup closes. Reopen it to see the result. Cancelling the folder picker does not start a download.
 
-**Updating from 1.3.0 to 1.3.1:** refresh the extension at `chrome://extensions`. The native host does not need to be reinstalled.
-
-**Updating from 1.2.7 or earlier to 1.3.1:** re-run `native-host/install.command`, then refresh the extension at `chrome://extensions`. The native host must also be updated for album selection and folder exports.
+**Updating from a published release to the current code:** re-run `native-host/install.command` and refresh the extension. A read-only protocol check runs before saving; a mismatched connector triggers an update message without downloading or importing. Interrupted background tasks are not retried automatically; check the destination first.
 
 You will be told how many succeeded. If one fails, the message names which one and why.
 
