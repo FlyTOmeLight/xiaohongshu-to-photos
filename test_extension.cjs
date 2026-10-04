@@ -273,3 +273,32 @@ test("progress messages keep the native port open and survive reopening", async 
   assert.equal(app.data.connectorJob.busy, false);
   assert.match(popup.controls.resultMessage.textContent, /已导入 2 张/);
 });
+
+for (const allFailed of [false, true]) {
+  test(`retry ${allFailed ? 'all' : 'partial'} failures preserves target and original indices`, async () => {
+    const app = extension();
+    app.note.images[0].index = 3;
+    app.note.images[1].index = 7;
+    let popup = app.openPopup();
+    await until(() => popup.controls.imageGrid.children.length === 2);
+    void popup.controls.saveButton.click();
+    await until(() => app.ports.length === 1);
+    const original = app.ports[0].payload;
+    app.ports[0].reply({ ok: !allFailed, saved: allFailed ? 0 : 1,
+      failedIndices: allFailed ? [3, 7] : [7], error: '下载失败' });
+    await until(() => !popup.controls.saveButton.disabled);
+    popup.close();
+    popup = app.openPopup();
+    await until(() => popup.controls.imageGrid.children.length === 2);
+    assert.equal(popup.controls.retryFailedButton.classList.contains('hidden'), false);
+    void popup.controls.retryFailedButton.click();
+    await until(() => app.ports.length === 2);
+    const retry = app.ports[1].payload;
+    assert.deepEqual(Array.from(retry.images, (item) => item.index), allFailed ? [3, 7] : [7]);
+    assert.equal(retry.destination, original.destination);
+    assert.equal(retry.albumId, original.albumId);
+    app.ports[1].reply({ ok: true, saved: retry.images.length, failedIndices: [] });
+    await until(() => !app.data.connectorJob.busy);
+    assert.equal(popup.controls.retryFailedButton.classList.contains('hidden'), true);
+  });
+}

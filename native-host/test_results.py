@@ -25,6 +25,7 @@ class SaveResultTests(MediaTestCase):
             self.assertTrue(result['ok'])
             self.assertEqual((result['saved'], result['failed']), (1, 1))
             self.assertIn('第 2 张', result['failureDetails'][0])
+            self.assertEqual(result['failedIndices'], [2])
             self.assertEqual(result['items'][0]['index'], 5)
             self.assertTrue((Path(result['folderPath']) / '05.gif').is_file())
 
@@ -57,6 +58,7 @@ class SaveResultTests(MediaTestCase):
         self.assertTrue(result['ok'])
         self.assertEqual((result['saved'], result['failed'], result['liveFallback']), (1, 1, 1))
         self.assertIn('第 2 张：相簿导入失败', result['failureDetails'])
+        self.assertEqual(result['failedIndices'], [2])
         self.assertEqual([item['index'] for item in result['items']], [5])
         self.assertIn('第 5 张', result['liveFallbackDetails'][0])
 

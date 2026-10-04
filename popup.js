@@ -22,7 +22,8 @@ const elements = {
   chooseFolder: document.querySelector("#chooseFolderButton"),
   folderPath: document.querySelector("#folderPath"),
   destinationHint: document.querySelector("#destinationHint"),
-  result: document.querySelector("#resultMessage")
+  result: document.querySelector("#resultMessage"),
+  retryFailed: document.querySelector("#retryFailedButton")
 };
 
 let note = { title: "小红书笔记", images: [] };
@@ -103,6 +104,8 @@ function applySession() {
   }
   const job = session.connectorJob;
   busy = Boolean(job?.busy);
+  elements.retryFailed.classList.toggle("hidden", busy || job?.payload?.pageUrl !== note.url
+    || !job?.result?.failedIndices?.length);
   updateSelectionUi();
   if (busy) {
     elements.saveLabel.textContent = job.payload.action === "save"
@@ -273,6 +276,25 @@ async function collect() {
 }
 
 elements.refresh.addEventListener("click", collect);
+elements.retryFailed.addEventListener("click", async () => {
+  const job = session.connectorJob;
+  if (busy || job?.payload?.pageUrl !== note.url || !job?.result?.failedIndices?.length) return;
+  const failed = new Set(job.result.failedIndices);
+  const payload = { ...job.payload, images: job.payload.images.filter((item) => failed.has(item.index)) };
+  if (!payload.images.length) return;
+  busy = true;
+  elements.retryFailed.classList.add("hidden");
+  updateSelectionUi();
+  try {
+    const result = await chrome.runtime.sendMessage({ type: "CONNECTOR_REQUEST", payload });
+    showSaveResult(payload, result, true);
+  } catch (error) {
+    showSaveResult(payload, { ok: false, error: error.message });
+  } finally {
+    busy = false;
+    applySession();
+  }
+});
 elements.retry.addEventListener("click", collect);
 elements.toggleAll.addEventListener("click", () => {
   if (busy) return;

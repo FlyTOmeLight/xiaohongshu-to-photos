@@ -587,9 +587,12 @@ def process(message: dict, on_progress=None) -> dict:
                     progress("import", completed, len(import_groups))
             downloaded = [item for item in downloaded if item["index"] in saved_indices]
         saved_count = len(downloaded)
+        saved_indices = {item["index"] for item in downloaded}
+        failed_indices = [index for index in indices if index not in saved_indices]
         if not saved_count:
             return {"ok": False, "error": "\n".join(failures) or "没有图片保存成功",
-                    "saved": 0, "failed": len(items), "failureDetails": failures}
+                    "saved": 0, "failed": len(items), "failureDetails": failures,
+                    "failedIndices": failed_indices}
         live_fallback_details = [fallback_details[item["index"]] for item in downloaded
                                  if item["index"] in fallback_details]
         return {
@@ -597,6 +600,7 @@ def process(message: dict, on_progress=None) -> dict:
             "saved": saved_count,
             "failed": len(items) - saved_count,
             "failureDetails": failures,
+            "failedIndices": failed_indices,
             "destination": destination,
             "folderPath": str(export_folder) if export_folder else "",
             "liveFallback": len(live_fallback_details),
