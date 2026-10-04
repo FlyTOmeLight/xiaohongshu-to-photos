@@ -82,9 +82,11 @@ function showSaveResult(payload, result, toast = false) {
     const target = local ? "本地文件夹" : payload.albumId ? `相簿“${payload.albumName}”` : "“照片”";
     const failedText = result.failed ? `，${result.failed} 张失败` : "";
     const fallbackText = result.liveFallback ? `，${result.liveFallback} 张仅保存静态图` : "";
-    const summary = `已${local ? "保存" : "导入"} ${result.saved} 张到${target}${failedText}${fallbackText}`;
+    const qualityText = result.qualityFallbackDetails?.length ? `，${result.qualityFallbackDetails.length} 张使用页面版本` : "";
+    const summary = `已${local ? "保存" : "导入"} ${result.saved} 张到${target}${failedText}${fallbackText}${qualityText}`;
     elements.result.textContent = [summary, ...(result.failureDetails || []),
-      ...(result.liveFallbackDetails || []), local ? result.folderPath : ""].filter(Boolean).join("\n");
+      ...(result.liveFallbackDetails || []), ...(result.qualityFallbackDetails || []),
+      local ? result.folderPath : ""].filter(Boolean).join("\n");
   }
   elements.result.classList.remove("hidden");
   if (toast) showToast(elements.result.textContent, 6000);

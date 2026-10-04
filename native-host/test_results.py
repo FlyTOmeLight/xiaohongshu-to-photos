@@ -74,3 +74,16 @@ class SaveResultTests(MediaTestCase):
         self.assertEqual(result, {'ok': True, 'protocolVersion': 2})
         download.assert_not_called()
         photos.assert_not_called()
+
+    def test_quality_warning_only_counts_saved_page_versions(self):
+        for failed_import in (False, True):
+            for transformed in (False, True):
+                with self.subTest(failed_import=failed_import, transformed=transformed):
+                    image = self.temporary_file('.jpg')
+                    url = self.image_url + ('!format/webp' if transformed else '')
+                    with (mock.patch.object(host, 'download_image', return_value=(image, url, 'jpg')),
+                          mock.patch.object(host, 'import_to_photos', side_effect=[(not failed_import, 1, '失败'), (True, 1, '')])):
+                        result = host.process({'images': [{'index': 4, 'url': url}, {'index': 9, 'url': self.image_url}]})
+                    self.assertEqual(len(result['qualityFallbackDetails']), int(transformed and not failed_import))
+                    if result['qualityFallbackDetails']:
+                        self.assertIn('第 4 张', result['qualityFallbackDetails'][0])

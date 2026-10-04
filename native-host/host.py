@@ -565,6 +565,7 @@ def process(message: dict, on_progress=None) -> dict:
                     "format": import_image_format,
                     "sourceFormat": image_format,
                     "kind": media_kind,
+                    "quality": "page" if used_url == url and url != image_candidates(url)[0] else "candidate",
                 })
             except Exception as error:
                 failures.append(f"第 {index} 张：{error}")
@@ -595,6 +596,8 @@ def process(message: dict, on_progress=None) -> dict:
                     "failedIndices": failed_indices}
         live_fallback_details = [fallback_details[item["index"]] for item in downloaded
                                  if item["index"] in fallback_details]
+        quality_details = [f"第 {item['index']} 张：原图候选不可用，已保存页面版本"
+                           for item in downloaded if item['quality'] == 'page']
         return {
             "ok": True,
             "saved": saved_count,
@@ -605,6 +608,7 @@ def process(message: dict, on_progress=None) -> dict:
             "folderPath": str(export_folder) if export_folder else "",
             "liveFallback": len(live_fallback_details),
             "liveFallbackDetails": live_fallback_details,
+            "qualityFallbackDetails": quality_details,
             "items": downloaded,
         }
     finally:
