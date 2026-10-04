@@ -20,7 +20,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-for folder in ('native-host', 'ios-shortcut'):
+for folder in ('native-host', 'ios-shortcut', 'scripts'):
     for source in Path(folder).glob('*.py'):
         ast.parse(source.read_text(), filename=str(source), feature_version=(3, 10))
 scripts = runpy.run_path('native-host/host.py')

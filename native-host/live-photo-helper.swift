@@ -137,6 +137,10 @@ func validateLivePhoto(imageURL: URL, videoURL: URL) throws {
 }
 
 func run() throws {
+    if CommandLine.arguments.dropFirst() == ["--version"] {
+        print("1")
+        return
+    }
     guard CommandLine.arguments.count == 3 else {
         throw NSError(
             domain: "RednoteLivePhoto",

@@ -48,7 +48,7 @@ Chrome 扩展不能直接写入 macOS 照片图库，所以走 Chrome 官方的 
 
 ## 安装
 
-需要 macOS、Chrome 109+、Python 3.10+ 和 Apple 命令行开发工具（包含 Swift 编译器）。缺少开发工具时运行 `xcode-select --install`；缺少 Python 时可通过 Homebrew 运行 `brew install python`。
+需要 macOS 13+、Chrome 109+、Python 3.10+。从 [Releases](https://github.com/FlyTOmeLight/xiaohongshu-to-photos/releases/latest) 下载 `xiaohongshu-to-photos-版本号.zip`，其中包含 Apple Silicon / Intel 通用实况组件，无需开发工具。GitHub 自动生成的 Source code 包和 git checkout 需要 Apple 命令行开发工具，可运行 `xcode-select --install`。缺少 Python 时可通过 Homebrew 运行 `brew install python`。
 
 1. 在 Finder 中打开项目的 `native-host` 文件夹。
 2. 右键 `install.command`，选择「打开」，确认运行。
@@ -56,7 +56,7 @@ Chrome 扩展不能直接写入 macOS 照片图库，所以走 Chrome 官方的 
 4. 开启「开发者模式」，点「加载已解压的扩展程序」，选择本项目文件夹。
 5. 确认扩展 ID 是 `doklnnbjpnipnicbiecefbchkhmckcbm`。
 
-安装脚本先检查依赖，再在临时目录编译实况照片组件。准备成功后才更新 `~/Library/Application Support/红薯收藏夹/` 和 Native Messaging 清单；编译失败不会覆盖已有连接器。连接器使用安装时选定的 Python 解释器启动。
+安装脚本先检查依赖，再在临时目录准备实况组件。发布包使用预编译组件，源码安装会编译。准备成功后才更新 `~/Library/Application Support/红薯收藏夹/` 和 Native Messaging 清单；编译失败不会覆盖已有连接器。连接器使用安装时选定的 Python 解释器启动。
 
 > **更新已有安装：** 更新项目文件，重新运行 `native-host/install.command`，再到 `chrome://extensions` 刷新扩展。只有扩展 ID 与上文不一致时，才需要移除后重新加载。
 
@@ -184,7 +184,7 @@ The connector only accepts messages from this extension's fixed ID, and only dow
 
 ## Installation
 
-Requires macOS, Chrome 109+, Python 3.10+, and Apple Command Line Tools (including Swift). Run `xcode-select --install` for the developer tools; Python can be installed through Homebrew with `brew install python`.
+Requires macOS 13+, Chrome 109+, and Python 3.10+. Download the `xiaohongshu-to-photos-VERSION.zip` asset from [Releases](https://github.com/FlyTOmeLight/xiaohongshu-to-photos/releases/latest). It contains a universal Apple Silicon / Intel helper and needs no developer tools. Git checkouts and GitHub Source code archives require Apple Command Line Tools (`xcode-select --install`). Python can be installed through Homebrew with `brew install python`.
 
 1. Open the project's `native-host` folder in Finder.
 2. Right-click `install.command`, choose **Open**, and confirm.
@@ -192,7 +192,7 @@ Requires macOS, Chrome 109+, Python 3.10+, and Apple Command Line Tools (includi
 4. Enable **Developer mode**, click **Load unpacked**, and select the project folder.
 5. Confirm the extension ID is `doklnnbjpnipnicbiecefbchkhmckcbm`.
 
-The installer checks dependencies and compiles the Live Photo helper in a temporary directory before updating `~/Library/Application Support/红薯收藏夹/` and the Native Messaging manifest. A compilation failure preserves the existing installation. The connector launches with the Python interpreter selected during installation.
+The installer checks dependencies and prepares the Live Photo helper in a temporary directory before updating `~/Library/Application Support/红薯收藏夹/` and the Native Messaging manifest. Release assets use the prebuilt helper; source installations compile it. A preparation failure preserves the existing installation. The connector launches with the Python interpreter selected during installation.
 
 > **Updating an existing installation:** update the project files, re-run `native-host/install.command`, then refresh the extension at `chrome://extensions`. Remove and reload only if its extension ID does not match the one above.
 
@@ -296,3 +296,7 @@ Please only save images you have the right to use, and respect creators' rights 
 本地导出目录包含 `source.json`，记录笔记标题、链接、成功图片编号、实际文件名、格式和画质来源。记录写入失败时会单独提示，已保存媒体会保留。
 
 弹窗的“保存历史”保留最近 100 次成功保存记录。记录只存于本设备，可手动清除。再次选择曾保存的图片会显示提示，仍可继续保存。清除历史不会删除已保存的图片。
+
+### 构建发布包
+
+先提交代码，再运行 `python3 -B scripts/build_release.py /目标目录`。脚本从 HEAD 打包，编译 macOS 13+ 的 arm64 和 x86_64 组件并合成通用二进制，验证签名、真实安装、协议和实况加载。CI 在 Apple Silicon 与 Intel 上分别执行这些检查；推送 `v*` 标签时自动发布附件和对应 `docs/releases/标签.md` 说明。组件使用临时签名，尚未通过 Apple 公证。

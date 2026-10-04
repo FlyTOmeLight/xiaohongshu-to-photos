@@ -101,3 +101,46 @@ class InstallationTests(unittest.TestCase):
             with mock.patch.object(installer.subprocess, 'run', side_effect=run):
                 installer.install(Path(__file__).parent, Path(root)/'support', Path(root)/'manifest.json', Path(sys.executable))
             self.assertEqual(commands[-1][0], '/compiler/swiftc')
+
+    def test_prebuilt_helper_installs_without_compilation(self):
+        installer = self.installer()
+        with tempfile.TemporaryDirectory() as root:
+            source = Path(root) / 'source'
+            (source / 'bin').mkdir(parents=True)
+            (source / 'host.py').write_text('host')
+            (source / 'bin/live-photo-helper').write_text('#!/bin/sh\necho 1\n')
+            with mock.patch.object(installer, 'build_helper') as compile_helper:
+                installer.install(source, Path(root) / 'installed', Path(root) / 'manifest.json', Path(sys.executable))
+                compile_helper.assert_not_called()
+            self.assertEqual((Path(root) / 'installed/live-photo-helper').read_text(), '#!/bin/sh\necho 1\n')
+
+    def test_invalid_prebuilt_helper_preserves_existing_installation(self):
+        installer = self.installer()
+        with tempfile.TemporaryDirectory() as root:
+            source = Path(root) / 'source'
+            (source / 'bin').mkdir(parents=True)
+            (source / 'host.py').write_text('new host')
+            (source / 'bin/live-photo-helper').write_text('#!/bin/sh\necho wrong-version\n')
+            support = Path(root) / 'installed'
+            support.mkdir()
+            (support / 'host.py').write_text('old host')
+            manifest = Path(root) / 'manifest.json'
+            manifest.write_text('old manifest')
+            with self.assertRaisesRegex(RuntimeError, '版本无效'):
+                installer.install(source, support, manifest, Path(sys.executable))
+            self.assertEqual((support / 'host.py').read_text(), 'old host')
+            self.assertEqual(manifest.read_text(), 'old manifest')
+
+    def test_release_install_does_not_require_developer_tools(self):
+        installer = self.installer()
+        is_file = Path.is_file
+        def with_prebuilt(path):
+            return True if path.name == 'live-photo-helper' and path.parent.name == 'bin' else is_file(path)
+        with (mock.patch.object(Path, 'is_file', with_prebuilt),
+              mock.patch.object(installer.platform, 'system', return_value='Darwin'),
+              mock.patch.object(installer.platform, 'mac_ver', return_value=('13.0', '', 'arm64')),
+              mock.patch.object(installer, 'install') as install,
+              mock.patch.object(installer.subprocess, 'run') as subprocess_run):
+            installer.main()
+            install.assert_called_once()
+            subprocess_run.assert_not_called()

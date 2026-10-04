@@ -1,6 +1,7 @@
 """Prepare and install the connector without modifying a working install on failure."""
 import json
 import os
+import platform
 import shlex
 import shutil
 import subprocess
@@ -12,12 +13,13 @@ HOST_NAME = 'com.rednote.photosaver'
 EXTENSION_ID = 'doklnnbjpnipnicbiecefbchkhmckcbm'
 
 
-def build_helper(source: Path, output: Path) -> None:
+def build_helper(source: Path, output: Path, target: str | None = None) -> None:
     compiler = subprocess.run(['/usr/bin/xcrun', '--sdk', 'macosx', '--find', 'swiftc'],
                               capture_output=True, text=True, check=True).stdout.strip()
     sdk = subprocess.run(['/usr/bin/xcrun', '--sdk', 'macosx', '--show-sdk-path'],
                          capture_output=True, text=True, check=True).stdout.strip()
-    subprocess.run([compiler, '-sdk', sdk, '-O', str(source), '-o', str(output)],
+    subprocess.run([compiler, '-sdk', sdk, '-O', *(['-target', target] if target else []),
+                    str(source), '-o', str(output)],
                    capture_output=True, text=True, check=True)
 
 
@@ -27,8 +29,17 @@ def install(source: Path, support: Path, manifest: Path, python: Path) -> None:
         stage = Path(work) / 'connector'
         stage.mkdir()
         shutil.copyfile(source / 'host.py', stage / 'host.py')
-        build_helper(source / 'live-photo-helper.swift', stage / 'live-photo-helper')
-        (stage / 'live-photo-helper').chmod(0o755)
+        helper = stage / 'live-photo-helper'
+        prebuilt = source / 'bin/live-photo-helper'
+        if prebuilt.is_file():
+            shutil.copyfile(prebuilt, helper)
+            helper.chmod(0o755)
+            result = subprocess.run([str(helper), '--version'], capture_output=True, text=True, check=True, timeout=10)
+            if result.stdout.strip() != '1':
+                raise RuntimeError('发布包中的实况组件版本无效。请重新下载完整发布包。')
+        else:
+            build_helper(source / 'live-photo-helper.swift', helper)
+            helper.chmod(0o755)
         launcher = stage / 'launch-host'
         launcher.write_text(f'#!/bin/zsh\nexec {shlex.quote(str(python))} {shlex.quote(str(support / "host.py"))} "$@"\n')
         launcher.chmod(0o755)
@@ -62,14 +73,18 @@ def main() -> None:
     try:
         if sys.version_info < (3, 10):
             raise RuntimeError('需要 Python 3.10 或更新版本。可通过 Homebrew 运行 brew install python。')
-        tools = subprocess.run(['/usr/bin/xcode-select', '-p'], capture_output=True, text=True)
-        if tools.returncode:
-            raise RuntimeError('缺少 Apple 命令行开发工具。请运行 xcode-select --install，安装后重试。')
+        source = Path(__file__).parent
+        if platform.system() != 'Darwin' or int(platform.mac_ver()[0].split('.')[0]) < 13:
+            raise RuntimeError('需要 macOS 13 或更新版本。')
+        if not (source / 'bin/live-photo-helper').is_file():
+            tools = subprocess.run(['/usr/bin/xcode-select', '-p'], capture_output=True, text=True)
+            if tools.returncode:
+                raise RuntimeError('源码安装需要 Apple 开发工具，请运行 xcode-select --install；也可下载内置组件的发布包。')
         support = Path.home() / 'Library/Application Support/红薯收藏夹'
         manifest = Path.home() / f'Library/Application Support/Google/Chrome/NativeMessagingHosts/{HOST_NAME}.json'
-        print('正在编译并安装实况照片连接器…', flush=True)
-        install(Path(__file__).parent, support, manifest, Path(sys.executable))
-    except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
+        print('正在安装实况照片连接器…', flush=True)
+        install(source, support, manifest, Path(sys.executable))
+    except (OSError, RuntimeError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
         detail = error.stderr if isinstance(error, subprocess.CalledProcessError) else str(error)
         print(f'安装失败：{detail or error}', file=sys.stderr)
         sys.exit(1)

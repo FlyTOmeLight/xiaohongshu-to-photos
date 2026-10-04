@@ -11,3 +11,4 @@ __pycache__/
 
 # Native host build output (compiled by install.command)
 native-host/live-photo-helper
+native-host/bin/
