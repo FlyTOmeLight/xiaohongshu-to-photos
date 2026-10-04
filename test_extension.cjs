@@ -40,7 +40,7 @@ class Control {
   click() { return this.disabled ? undefined : this.handlers.click(); }
 }
 
-function extension({ statusResult = { ok: true, protocolVersion: 2 } } = {}) {
+function extension({ statusResult = { ok: true, protocolVersion: 3 } } = {}) {
   const data = {};
   const localData = {};
   const listeners = new Set();
@@ -329,4 +329,22 @@ test('destination preferences survive a browser session reset and another note',
   assert.equal(popup.controls.destinationSelect.value, 'folder');
   assert.equal(popup.controls.folderPath.textContent, '/tmp/persistent-folder');
   assert.equal(popup.controls.imageCount.textContent, '已选 2 / 2 张');
+});
+
+test('a reopened popup can stop a running native save without disconnecting it', async () => {
+  const app = extension();
+  let popup = app.openPopup();
+  await until(() => popup.controls.imageGrid.children.length === 2);
+  void popup.controls.saveButton.click();
+  await until(() => app.ports.length === 1);
+  popup.close();
+  popup = app.openPopup();
+  await until(() => popup.controls.imageGrid.children.length === 2);
+  assert.equal(popup.controls.stopButton.classList.contains('hidden'), false);
+  void popup.controls.stopButton.click();
+  await until(() => app.requests.some((request) => request.action === 'cancel'));
+  assert.equal(app.data.connectorJob.busy, true);
+  app.ports[0].reply({ ok: true, saved: 1, cancelled: true, failedIndices: [2] });
+  await until(() => !app.data.connectorJob.busy);
+  assert.match(popup.controls.resultMessage.textContent, /已保留/);
 });

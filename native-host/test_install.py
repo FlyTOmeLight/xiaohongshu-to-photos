@@ -52,7 +52,7 @@ class InstallationTests(unittest.TestCase):
             length = struct.unpack('@I', response[:4])[0]
             result = json.loads(response[4:])
             self.assertEqual(length, len(response[4:]))
-            self.assertEqual(result, {'ok': True, 'protocolVersion': 2})
+            self.assertEqual(result, {'ok': True, 'protocolVersion': 3})
 
     def test_manifest_failure_rolls_back_connector(self):
         installer = self.installer()

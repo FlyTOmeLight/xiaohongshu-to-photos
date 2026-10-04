@@ -63,14 +63,15 @@
           </div>
           <p id="destinationHint" class="destination-hint">原图、GIF、实况 · 可同步 iCloud</p>
         </div>
+        <p id="resultMessage" class="result-message hidden" role="status" aria-live="polite"></p>
+        <button id="retryFailedButton" class="target-button hidden" type="button">重试失败项</button>
+        <button id="stopButton" class="target-button hidden" type="button">停止任务</button>
         <button id="saveButton" class="save-button" type="button">
           <span id="saveButtonLabel">导入照片</span>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 19h14"/></svg>
         </button>
       </footer>
 
-      <p id="resultMessage" class="result-message hidden" role="status" aria-live="polite"></p>
-      <button id="retryFailedButton" class="secondary-button hidden" type="button">只重试失败图片</button>
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
     </main>
     <script src="popup.js"></script>

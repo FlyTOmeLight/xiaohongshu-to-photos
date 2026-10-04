@@ -71,7 +71,7 @@ class SaveResultTests(MediaTestCase):
     def test_protocol_check_is_read_only(self):
         with mock.patch.object(host, 'download_image') as download, mock.patch.object(host, 'import_to_photos') as photos:
             result = host.process({'action': 'status'})
-        self.assertEqual(result, {'ok': True, 'protocolVersion': 2})
+        self.assertEqual(result, {'ok': True, 'protocolVersion': 3})
         download.assert_not_called()
         photos.assert_not_called()
 

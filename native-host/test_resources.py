@@ -29,8 +29,13 @@ class ResourceTests(MediaTestCase):
                 mock.patch.object(host.tempfile, 'mkstemp', side_effect=lambda **kw: real_mkstemp(dir=directory, **kw)),
                 mock.patch.object(host.os, 'fdopen', side_effect=broken_writer),
             ):
-                with self.assertRaisesRegex(OSError, '磁盘已满'):
-                    host.persist_image(b'GIF89a', 'gif')
+                response = mock.MagicMock()
+                response.__enter__.return_value = response
+                response.headers = {}
+                response.read.side_effect = [b'GIF89a', b'']
+                with mock.patch.object(host, 'open_download', return_value=response):
+                    with self.assertRaisesRegex(OSError, '磁盘已满'):
+                        host.download_media(self.image_url, 'image/*')
             self.assertEqual(list(Path(directory).iterdir()), [])
 
     def test_conversion_timeout_removes_output(self):

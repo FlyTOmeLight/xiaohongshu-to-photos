@@ -108,7 +108,7 @@ button:focus-visible, select:focus-visible { outline: 2px solid var(--red); outl
   cursor: pointer;
 }
 
-.gallery { padding: 3px 18px 240px; }
+.gallery { padding: 3px 18px 330px; }
 .note-info { padding: 5px 2px 13px; }
 .note-title { margin: 0 0 10px; font-size: 14px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .selection-row { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; }
@@ -181,7 +181,7 @@ button:focus-visible, select:focus-visible { outline: 2px solid var(--red); outl
 .target-button:disabled { opacity: .55; cursor: default; }
 .folder-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #625d58; }
 .destination-hint { margin: 10px 0 0; color: #625d58; line-height: 1.5; }
-.result-message { position: fixed; z-index: 6; left: 17px; right: 169px; bottom: 16px; margin: 0; max-height: 58px; overflow: auto; color: var(--ink); font-size: 12px; line-height: 1.5; white-space: pre-line; }
+.result-message { width: 100%; margin: 0; max-height: 64px; overflow: auto; color: var(--ink); font-size: 12px; line-height: 1.5; white-space: pre-line; overflow-wrap: anywhere; }
 
 .save-button {
   margin-left: auto;

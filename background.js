@@ -1,6 +1,8 @@
 const NATIVE_HOST = "com.rednote.photosaver";
-const PROTOCOL_VERSION = 2;
+const PROTOCOL_VERSION = 3;
 let running = false;
+let savePort;
+let stopRequested = false;
 const ready = recoverInterruptedJob();
 
 async function recoverInterruptedJob() {
@@ -16,6 +18,7 @@ async function recoverInterruptedJob() {
 function requestNative(payload, onProgress) {
   return new Promise((resolve) => {
     const port = chrome.runtime.connectNative(NATIVE_HOST);
+    if (payload.action === "save") savePort = port;
     let received = false;
     let progressUpdates = Promise.resolve();
     port.onMessage.addListener((result) => {
@@ -25,6 +28,7 @@ function requestNative(payload, onProgress) {
         return;
       }
       received = true;
+      if (savePort === port) savePort = undefined;
       port.disconnect();
       progressUpdates.then(() => resolve(result || { ok: false, error: "本机连接器没有返回结果" }),
         (error) => resolve({ ok: false, error: error.message }));
@@ -33,6 +37,7 @@ function requestNative(payload, onProgress) {
       const error = chrome.runtime.lastError;
       if (received) return;
       received = true;
+      if (savePort === port) savePort = undefined;
       const detail = error?.message || "本机连接器没有返回结果";
       const result = { ok: false, code: "NATIVE_CONNECTION", error: /not found|not registered|does not exist/i.test(detail)
         ? "尚未安装照片连接器，请先运行 install.command"
@@ -40,6 +45,7 @@ function requestNative(payload, onProgress) {
       progressUpdates.then(() => resolve(result), () => resolve(result));
     });
     port.postMessage(payload);
+    if (payload.action === "save" && stopRequested) port.postMessage({ action: "cancel" });
   });
 }
 
@@ -71,6 +77,14 @@ async function runJob(payload) {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "CONNECTOR_CANCEL") {
+    if (running) {
+      stopRequested = true;
+      savePort?.postMessage({ action: "cancel" });
+    }
+    sendResponse({ ok: true });
+    return;
+  }
   if (message?.type === "CONNECTOR_STATE") {
     ready.then(() => sendResponse({ ok: true }), (error) => sendResponse({ ok: false, error: error.message }));
     return true;
@@ -81,6 +95,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return;
   }
   running = true;
+  stopRequested = false;
   runJob(message.payload).then(sendResponse, (error) => {
     sendResponse({ ok: false, error: error.message || "保存失败" });
   }).finally(() => { running = false; });

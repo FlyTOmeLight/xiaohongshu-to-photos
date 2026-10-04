@@ -12,12 +12,24 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import urllib.parse
 import urllib.request
 from pathlib import Path
 
 MAX_MESSAGE_BYTES = 1024 * 1024
-PROTOCOL_VERSION = 2
+PROTOCOL_VERSION = 3
+CANCELLED = threading.Event()
+DOWNLOAD_CHUNK_BYTES = 256 * 1024
+
+
+class SaveCancelled(Exception):
+    pass
+
+
+def check_cancelled():
+    if CANCELLED.is_set():
+        raise SaveCancelled("任务已停止")
 MAX_IMAGE_BYTES = 80 * 1024 * 1024
 LIVE_PHOTO_HELPER = Path(__file__).with_name("live-photo-helper")
 ALLOWED_HOST_SUFFIXES = (
@@ -99,7 +111,7 @@ def choose_folder() -> dict:
 def read_exact(size: int) -> bytes:
     chunks = bytearray()
     while len(chunks) < size:
-        chunk = sys.stdin.buffer.read(size - len(chunks))
+        chunk = getattr(sys.stdin.buffer, "raw", sys.stdin.buffer).read(size - len(chunks))
         if not chunk:
             raise EOFError("native message ended early")
         chunks.extend(chunk)
@@ -107,7 +119,7 @@ def read_exact(size: int) -> bytes:
 
 
 def read_message() -> dict:
-    raw_length = sys.stdin.buffer.read(4)
+    raw_length = getattr(sys.stdin.buffer, "raw", sys.stdin.buffer).read(4)
     if not raw_length:
         raise EOFError
     if len(raw_length) != 4:
@@ -193,7 +205,7 @@ class AllowedRedirectHandler(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(request, response, code, message, headers, new_url)
 
 
-def fetch_url(url: str, accept: str) -> bytes:
+def open_download(url: str, accept: str):
     if not allowed_url(url):
         raise ValueError("不允许的下载地址")
     request = urllib.request.Request(
@@ -208,7 +220,11 @@ def fetch_url(url: str, accept: str) -> bytes:
         },
     )
     opener = urllib.request.build_opener(AllowedRedirectHandler())
-    with opener.open(request, timeout=30) as response:
+    return opener.open(request, timeout=30)
+
+
+def fetch_url(url: str, accept: str) -> bytes:
+    with open_download(url, accept) as response:
         content_length = int(response.headers.get("Content-Length") or 0)
         if content_length > MAX_IMAGE_BYTES:
             raise ValueError("图片超过 80 MB")
@@ -216,10 +232,6 @@ def fetch_url(url: str, accept: str) -> bytes:
     if len(data) > MAX_IMAGE_BYTES:
         raise ValueError("图片超过 80 MB")
     return data
-
-
-def fetch_image(url: str) -> bytes:
-    return fetch_url(url, "image/png,image/jpeg,image/gif,image/webp,image/avif,image/*,*/*;q=0.8")
 
 
 def image_identity(raw_url: str) -> str:
@@ -313,17 +325,42 @@ def live_video_map_from_page(page_url: str) -> dict[str, list[str]]:
     return results
 
 
-def persist_image(data: bytes, image_format: str) -> Path:
-    descriptor, filename = tempfile.mkstemp(prefix="rednote_", suffix=f".{image_format}")
+def download_media(url: str, accept: str, video: bool = False) -> tuple[Path, str]:
+    check_cancelled()
+    descriptor, filename = tempfile.mkstemp(prefix="rednote_", suffix=".download")
+    path = Path(filename)
     try:
-        with os.fdopen(descriptor, "wb") as file:
-            file.write(data)
-        return Path(filename)
+        with os.fdopen(descriptor, "wb") as file, open_download(url, accept) as response:
+            if int(response.headers.get("Content-Length") or 0) > MAX_IMAGE_BYTES:
+                raise ValueError("媒体超过 80 MB")
+            size = 0
+            header = b""
+            while True:
+                check_cancelled()
+                chunk = response.read(DOWNLOAD_CHUNK_BYTES)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MAX_IMAGE_BYTES:
+                    raise ValueError("媒体超过 80 MB")
+                header = (header + chunk[:16])[:16]
+                file.write(chunk)
+        image_format = sniff_format(header)
+        if video:
+            if len(header) < 12 or header[4:8] != b"ftyp" or image_format:
+                raise ValueError("服务器返回的内容不是受支持的实况视频")
+            media_format = "mov"
+        else:
+            if not image_format:
+                raise ValueError("服务器返回的内容不是受支持的图片")
+            media_format = image_format
+        renamed = path.with_suffix(f".{media_format}")
+        path.rename(renamed)
+        return renamed, media_format
     except Exception:
         with contextlib.suppress(OSError):
             os.close(descriptor)
-        with contextlib.suppress(OSError):
-            Path(filename).unlink()
+        path.unlink(missing_ok=True)
         raise
 
 
@@ -331,11 +368,10 @@ def download_image(raw_url: str) -> tuple[Path, str, str]:
     last_error: Exception | None = None
     for candidate in image_candidates(raw_url):
         try:
-            data = fetch_image(candidate)
-            image_format = sniff_format(data)
-            if not image_format:
-                raise ValueError("服务器返回的内容不是受支持的图片")
-            return persist_image(data, image_format), candidate, image_format
+            path, image_format = download_media(candidate, "image/*,*/*;q=0.8")
+            return path, candidate, image_format
+        except SaveCancelled:
+            raise
         except Exception as error:  # Try the next CDN/original candidate.
             last_error = error
     raise last_error or RuntimeError("无法下载图片")
@@ -349,10 +385,9 @@ def download_video(raw_url: str) -> tuple[Path, str]:
     last_error: Exception | None = None
     for candidate in dict.fromkeys((secure_url, raw_url)):
         try:
-            data = fetch_url(candidate, "video/quicktime,video/mp4,video/*,*/*;q=0.8")
-            if len(data) < 12 or data[4:8] != b"ftyp" or sniff_format(data):
-                raise ValueError("服务器返回的内容不是受支持的实况视频")
-            return persist_image(data, "mov"), "mov"
+            return download_media(candidate, "video/*,*/*;q=0.8", video=True)
+        except SaveCancelled:
+            raise
         except Exception as error:
             last_error = error
     raise last_error or RuntimeError("无法下载实况视频")
@@ -475,7 +510,7 @@ def process(message: dict, on_progress=None) -> dict:
         and not item.get("videoUrls")
         for item in items
     )
-    if needs_live_lookup:
+    if needs_live_lookup and not CANCELLED.is_set():
         try:
             page_live_urls = live_video_map_from_page(str(message.get("pageUrl") or ""))
         except Exception as error:
@@ -487,6 +522,8 @@ def process(message: dict, on_progress=None) -> dict:
             # A new directory per export prevents overwriting earlier saves.
             export_folder = Path(tempfile.mkdtemp(prefix=f"{title}-", dir=folder))
         for completed, (index, item) in enumerate(zip(indices, items), start=1):
+            if CANCELLED.is_set():
+                break
             fallback_detail = ""
             try:
                 if not isinstance(item, dict) or not allowed_url(item.get("url")):
@@ -532,6 +569,8 @@ def process(message: dict, on_progress=None) -> dict:
                                 paired_video_path = pair_video
                                 media_kind = "live"
                                 break
+                            except SaveCancelled:
+                                raise
                             except Exception as error:
                                 last_live_error = error
                     if media_kind != "live":
@@ -539,6 +578,7 @@ def process(message: dict, on_progress=None) -> dict:
                         # failing the item, and report it so the popup can say so.
                         fallback_detail = f"第 {index} 张：{last_live_error or page_live_error or '没有实况视频地址'}"
 
+                check_cancelled()
                 resource_paths = [import_image_path]
                 if is_live_item and media_kind == "live" and paired_video_path:
                     resource_paths.append(paired_video_path)
@@ -567,6 +607,8 @@ def process(message: dict, on_progress=None) -> dict:
                     "kind": media_kind,
                     "quality": "page" if used_url == url and url != image_candidates(url)[0] else "candidate",
                 })
+            except SaveCancelled:
+                break
             except Exception as error:
                 failures.append(f"第 {index} 张：{error}")
             finally:
@@ -577,6 +619,8 @@ def process(message: dict, on_progress=None) -> dict:
             if import_groups:
                 progress("import", 0, len(import_groups))
             for completed, (index, resources) in enumerate(import_groups, start=1):
+                if CANCELLED.is_set():
+                    break
                 try:
                     imported, _, detail = import_to_photos(resources, album_id)
                     if not imported:
@@ -591,9 +635,9 @@ def process(message: dict, on_progress=None) -> dict:
         saved_indices = {item["index"] for item in downloaded}
         failed_indices = [index for index in indices if index not in saved_indices]
         if not saved_count:
-            return {"ok": False, "error": "\n".join(failures) or "没有图片保存成功",
+            return {"ok": False, "error": "\n".join(failures) or ("任务已停止" if CANCELLED.is_set() else "没有图片保存成功"),
                     "saved": 0, "failed": len(items), "failureDetails": failures,
-                    "failedIndices": failed_indices}
+                    "failedIndices": failed_indices, "cancelled": CANCELLED.is_set()}
         live_fallback_details = [fallback_details[item["index"]] for item in downloaded
                                  if item["index"] in fallback_details]
         quality_details = [f"第 {item['index']} 张：原图候选不可用，已保存页面版本"
@@ -604,6 +648,7 @@ def process(message: dict, on_progress=None) -> dict:
             "failed": len(items) - saved_count,
             "failureDetails": failures,
             "failedIndices": failed_indices,
+            "cancelled": CANCELLED.is_set(),
             "destination": destination,
             "folderPath": str(export_folder) if export_folder else "",
             "liveFallback": len(live_fallback_details),
@@ -624,7 +669,19 @@ def process(message: dict, on_progress=None) -> dict:
 
 def main() -> None:
     try:
-        send_message(process(read_message(), send_message))
+        message = read_message()
+        CANCELLED.clear()
+        if message.get("action", "save") == "save":
+            def read_control():
+                try:
+                    while True:
+                        if read_message().get("action") == "cancel":
+                            CANCELLED.set()
+                            return
+                except (EOFError, ValueError):
+                    return
+            threading.Thread(target=read_control, daemon=True).start()
+        send_message(process(message, send_message))
     except EOFError:
         return
     except Exception as error:

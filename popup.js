@@ -23,7 +23,8 @@ const elements = {
   folderPath: document.querySelector("#folderPath"),
   destinationHint: document.querySelector("#destinationHint"),
   result: document.querySelector("#resultMessage"),
-  retryFailed: document.querySelector("#retryFailedButton")
+  retryFailed: document.querySelector("#retryFailedButton"),
+  stop: document.querySelector("#stopButton")
 };
 
 let note = { title: "小红书笔记", images: [] };
@@ -91,7 +92,7 @@ function showSaveResult(payload, result, toast = false) {
     const fallbackText = result.liveFallback ? `，${result.liveFallback} 张仅保存静态图` : "";
     const qualityText = result.qualityFallbackDetails?.length ? `，${result.qualityFallbackDetails.length} 张使用页面版本` : "";
     const summary = `已${local ? "保存" : "导入"} ${result.saved} 张到${target}${failedText}${fallbackText}${qualityText}`;
-    elements.result.textContent = [summary, ...(result.failureDetails || []),
+    elements.result.textContent = [result.cancelled ? "任务已停止，已保存的图片已保留" : "", summary, ...(result.failureDetails || []),
       ...(result.liveFallbackDetails || []), ...(result.qualityFallbackDetails || []),
       local ? result.folderPath : ""].filter(Boolean).join("\n");
   }
@@ -113,6 +114,7 @@ function applySession() {
   }
   const job = session.connectorJob;
   busy = Boolean(job?.busy);
+  elements.stop.classList.toggle("hidden", !busy || job?.payload?.action !== "save");
   elements.retryFailed.classList.toggle("hidden", busy || job?.payload?.pageUrl !== note.url
     || !job?.result?.failedIndices?.length);
   updateSelectionUi();
@@ -285,6 +287,11 @@ async function collect() {
 }
 
 elements.refresh.addEventListener("click", collect);
+elements.stop.addEventListener("click", async () => {
+  if (!busy) return;
+  await chrome.runtime.sendMessage({ type: "CONNECTOR_CANCEL" });
+  elements.saveLabel.textContent = "正在停止…";
+});
 elements.retryFailed.addEventListener("click", async () => {
   const job = session.connectorJob;
   if (busy || job?.payload?.pageUrl !== note.url || !job?.result?.failedIndices?.length) return;

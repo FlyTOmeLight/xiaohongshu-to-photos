@@ -39,7 +39,7 @@ response = subprocess.run([config['path']], input=struct.pack('@I', len(payload)
                           capture_output=True, check=True, timeout=10).stdout
 if len(response) < 4 or struct.unpack('@I', response[:4])[0] != len(response[4:]):
     raise RuntimeError('Installed connector returned an invalid native frame')
-if json.loads(response[4:]) != {'ok': True, 'protocolVersion': 2}:
+if json.loads(response[4:]) != {'ok': True, 'protocolVersion': 3}:
     raise RuntimeError('Installed connector returned an unexpected protocol version')
 # Exercise real media without writing to the user's Photos library.
 compiler = subprocess.check_output(['/usr/bin/xcrun', '--sdk', 'macosx', '--find', 'swiftc'], text=True).strip()
