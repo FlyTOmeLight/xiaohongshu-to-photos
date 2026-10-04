@@ -12,15 +12,22 @@ HOST_NAME = 'com.rednote.photosaver'
 EXTENSION_ID = 'doklnnbjpnipnicbiecefbchkhmckcbm'
 
 
-def install(source: Path, support: Path, manifest: Path, python: Path, swiftc: str) -> None:
+def build_helper(source: Path, output: Path) -> None:
+    compiler = subprocess.run(['/usr/bin/xcrun', '--sdk', 'macosx', '--find', 'swiftc'],
+                              capture_output=True, text=True, check=True).stdout.strip()
+    sdk = subprocess.run(['/usr/bin/xcrun', '--sdk', 'macosx', '--show-sdk-path'],
+                         capture_output=True, text=True, check=True).stdout.strip()
+    subprocess.run([compiler, '-sdk', sdk, '-O', str(source), '-o', str(output)],
+                   capture_output=True, text=True, check=True)
+
+
+def install(source: Path, support: Path, manifest: Path, python: Path) -> None:
     support.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.rednote-install-', dir=support.parent) as work:
         stage = Path(work) / 'connector'
         stage.mkdir()
         shutil.copyfile(source / 'host.py', stage / 'host.py')
-        subprocess.run([swiftc, '-O', str(source / 'live-photo-helper.swift'),
-                        '-o', str(stage / 'live-photo-helper')],
-                       capture_output=True, text=True, check=True)
+        build_helper(source / 'live-photo-helper.swift', stage / 'live-photo-helper')
         (stage / 'live-photo-helper').chmod(0o755)
         launcher = stage / 'launch-host'
         launcher.write_text(f'#!/bin/zsh\nexec {shlex.quote(str(python))} {shlex.quote(str(support / "host.py"))} "$@"\n')
@@ -58,11 +65,10 @@ def main() -> None:
         tools = subprocess.run(['/usr/bin/xcode-select', '-p'], capture_output=True, text=True)
         if tools.returncode:
             raise RuntimeError('缺少 Apple 命令行开发工具。请运行 xcode-select --install，安装后重试。')
-        compiler = subprocess.run(['/usr/bin/xcrun', '--find', 'swiftc'], capture_output=True, text=True, check=True)
         support = Path.home() / 'Library/Application Support/红薯收藏夹'
         manifest = Path.home() / f'Library/Application Support/Google/Chrome/NativeMessagingHosts/{HOST_NAME}.json'
         print('正在编译并安装实况照片连接器…', flush=True)
-        install(Path(__file__).parent, support, manifest, Path(sys.executable), compiler.stdout.strip())
+        install(Path(__file__).parent, support, manifest, Path(sys.executable))
     except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
         detail = error.stderr if isinstance(error, subprocess.CalledProcessError) else str(error)
         print(f'安装失败：{detail or error}', file=sys.stderr)

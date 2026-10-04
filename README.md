@@ -123,7 +123,7 @@ Chrome 扩展不能直接写入 macOS 照片图库，所以走 Chrome 官方的 
 
 ## 开发验证
 
-在项目根目录运行 `./scripts/check.command`。需要 Node.js 22+、Python 3.10+ 和 Apple 命令行开发工具。该命令运行扩展、页面解析、连接器和安装回归测试，检查脚本语法，并编译 AppleScript 与 Swift；临时编译产物会自动清理。测试不会写入真实照片图库。
+在项目根目录运行 `./scripts/check.command`。需要 Node.js 22+、Python 3.10+ 和 Apple 命令行开发工具。该命令运行回归测试、检查脚本语法并编译 AppleScript，还会在临时目录执行真实连接器安装与协议检查。Swift 编译使用所选工具链的 macOS SDK。临时产物会自动清理，测试不会写入真实照片图库。
 
 GitHub Actions 在每次向 `main` 推送和创建 PR 时，在 macOS 上运行相同检查，并验证最低支持的 Python 3.10。
 
@@ -259,7 +259,7 @@ See [ios-shortcut/README.md](ios-shortcut/README.md) for setup.
 
 ## Development checks
 
-Run `./scripts/check.command` from the project root. Requires Node.js 22+, Python 3.10+, and Apple Command Line Tools. It runs extension, parser, connector and installer regression tests, checks script syntax, and compiles AppleScript and Swift. Temporary build outputs are removed automatically. Tests do not write to your photo library.
+Run `./scripts/check.command` from the project root. Requires Node.js 22+, Python 3.10+, and Apple Command Line Tools. It runs regression tests, checks script syntax, compiles AppleScript, and performs a real connector installation and protocol check in a temporary directory. Swift compilation uses the selected toolchain's macOS SDK. Temporary outputs are removed automatically. Tests do not write to your photo library.
 
 GitHub Actions runs the same checks on macOS for pushes to `main` and pull requests, using the minimum supported Python 3.10.
 

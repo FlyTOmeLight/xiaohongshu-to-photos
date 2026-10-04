@@ -27,9 +27,9 @@ class InstallationTests(unittest.TestCase):
             (support / 'live-photo-helper').write_text('old helper')
             manifest = Path(root) / 'manifest.json'
             manifest.write_text('old manifest')
-            with mock.patch.object(installer.subprocess, 'run', side_effect=subprocess.CalledProcessError(1, 'swiftc')):
+            with mock.patch.object(installer, 'build_helper', side_effect=subprocess.CalledProcessError(1, 'swiftc')):
                 with self.assertRaises(subprocess.CalledProcessError):
-                    installer.install(Path(__file__).parent, support, manifest, Path(sys.executable), '/swiftc')
+                    installer.install(Path(__file__).parent, support, manifest, Path(sys.executable))
             self.assertEqual((support / 'host.py').read_text(), 'old host')
             self.assertEqual((support / 'live-photo-helper').read_text(), 'old helper')
             self.assertEqual(manifest.read_text(), 'old manifest')
@@ -40,10 +40,10 @@ class InstallationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             support = Path(root) / "连接器 with ' quotes"
             manifest = Path(root) / 'hosts' / 'manifest.json'
-            def compile_helper(command, **kwargs):
-                Path(command[-1]).write_text('#!/bin/sh\nexit 0\n')
-            with mock.patch.object(installer.subprocess, 'run', side_effect=compile_helper):
-                installer.install(Path(__file__).parent, support, manifest, Path(sys.executable), '/swiftc')
+            def compile_helper(source, output):
+                output.write_text('#!/bin/sh\nexit 0\n')
+            with mock.patch.object(installer, 'build_helper', side_effect=compile_helper):
+                installer.install(Path(__file__).parent, support, manifest, Path(sys.executable))
             config = json.loads(manifest.read_text())
             self.assertEqual(config['allowed_origins'], ['chrome-extension://doklnnbjpnipnicbiecefbchkhmckcbm/'])
             payload = json.dumps({'action': 'status'}).encode()
@@ -62,17 +62,17 @@ class InstallationTests(unittest.TestCase):
             (support / 'host.py').write_text('old host')
             manifest = Path(root) / 'manifest.json'
             manifest.write_text('old manifest')
-            def compile_helper(command, **kwargs):
-                Path(command[-1]).write_text('helper')
+            def compile_helper(source, output):
+                output.write_text('helper')
             replace = installer.os.replace
             def fail_manifest(source, destination):
                 if Path(destination) == manifest:
                     raise OSError('清单写入失败')
                 return replace(source, destination)
-            with (mock.patch.object(installer.subprocess, 'run', side_effect=compile_helper),
+            with (mock.patch.object(installer, 'build_helper', side_effect=compile_helper),
                   mock.patch.object(installer.os, 'replace', side_effect=fail_manifest)):
                 with self.assertRaisesRegex(OSError, '清单写入失败'):
-                    installer.install(Path(__file__).parent, support, manifest, Path(sys.executable), '/swiftc')
+                    installer.install(Path(__file__).parent, support, manifest, Path(sys.executable))
             self.assertEqual((support / 'host.py').read_text(), 'old host')
             self.assertEqual(manifest.read_text(), 'old manifest')
 
@@ -85,3 +85,19 @@ class InstallationTests(unittest.TestCase):
                 installer.main()
         self.assertEqual(error.exception.code, 1)
         install.assert_not_called()
+
+    def test_compiler_receives_selected_macos_sdk(self):
+        installer = self.installer()
+        with tempfile.TemporaryDirectory() as root:
+            commands = []
+            def run(command, **kwargs):
+                commands.append(command)
+                if command[0] == '/usr/bin/xcrun':
+                    return mock.Mock(stdout='/compiler/swiftc\n' if '--find' in command else '/SDK/MacOSX.sdk\n')
+                if '-sdk' not in command:
+                    raise subprocess.CalledProcessError(1, command, stderr="unable to load standard library for target 'arm64-apple-macosx27.0.0'")
+                self.assertEqual(command[command.index('-sdk') + 1], '/SDK/MacOSX.sdk')
+                Path(command[-1]).write_text('helper')
+            with mock.patch.object(installer.subprocess, 'run', side_effect=run):
+                installer.install(Path(__file__).parent, Path(root)/'support', Path(root)/'manifest.json', Path(sys.executable))
+            self.assertEqual(commands[-1][0], '/compiler/swiftc')
