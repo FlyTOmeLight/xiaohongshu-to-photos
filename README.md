@@ -74,6 +74,8 @@ Chrome 扩展不能直接写入 macOS 照片图库，所以走 Chrome 官方的 
 
 扩展在工具栏按钮下方显示小弹窗。系统文件夹选择器可能使弹窗关闭；选好后再次点击扩展即可继续，勾选状态和保存位置会保留。保存任务在后台执行，关闭弹窗后仍能完成，再次打开可查看结果。取消文件夹选择不会开始下载。
 
+保存时显示已处理数量和导入阶段。关闭后重开仍可查看当前进度。单次超过 30 张时，请先减少勾选；失败提示和本地文件名使用原笔记的图片编号。
+
 **从已发布版本更新到当前代码：** 必须重新运行 `native-host/install.command` 并刷新扩展。保存前会检查连接器协议；版本不匹配时会提示更新，不会开始下载或导入。后台中断的任务不会自动重试，请先检查保存位置。
 
 导入完成后会提示成功张数。如果某张失败，提示里会说明是哪一张、为什么。
@@ -201,6 +203,8 @@ Photos is the default destination. Click **读取相簿** (Load albums) to selec
 For local files, choose **本地文件夹** (Local folder), click **选择文件夹** (Choose folder), then **保存 N 张** (Save N). Each export creates a separate subfolder named after the post, so previous exports are never overwritten. Ordinary images and GIFs retain their format. Live Photos are saved as matching image/MOV pairs, such as `02.jpg` and `02.mov`; a folder does not play them as Live Photos.
 
 The extension opens a small popup below its toolbar button. The system folder picker may close the popup; click the extension again after choosing a folder to continue with your selection and destination preserved. Save tasks run in the background and finish even when the popup closes. Reopen it to see the result. Cancelling the folder picker does not start a download.
+
+Saving shows processed counts and the import phase, including after reopening the popup. Reduce your selection if it exceeds 30 images. Failure messages and exported filenames use the image numbers from the original note.
 
 **Updating from a published release to the current code:** re-run `native-host/install.command` and refresh the extension. A read-only protocol check runs before saving; a mismatched connector triggers an update message without downloading or importing. Interrupted background tasks are not retried automatically; check the destination first.
 

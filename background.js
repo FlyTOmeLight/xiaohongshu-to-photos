@@ -13,22 +13,31 @@ async function recoverInterruptedJob() {
   }
 }
 
-function requestNative(payload) {
+function requestNative(payload, onProgress) {
   return new Promise((resolve) => {
     const port = chrome.runtime.connectNative(NATIVE_HOST);
     let received = false;
+    let progressUpdates = Promise.resolve();
     port.onMessage.addListener((result) => {
+      if (received) return;
+      if (result?.event === "progress") {
+        if (onProgress) progressUpdates = progressUpdates.then(() => onProgress(result));
+        return;
+      }
       received = true;
-      resolve(result || { ok: false, error: "本机连接器没有返回结果" });
       port.disconnect();
+      progressUpdates.then(() => resolve(result || { ok: false, error: "本机连接器没有返回结果" }),
+        (error) => resolve({ ok: false, error: error.message }));
     });
     port.onDisconnect.addListener(() => {
       const error = chrome.runtime.lastError;
       if (received) return;
+      received = true;
       const detail = error?.message || "本机连接器没有返回结果";
-      resolve({ ok: false, code: "NATIVE_CONNECTION", error: /not found|not registered|does not exist/i.test(detail)
+      const result = { ok: false, code: "NATIVE_CONNECTION", error: /not found|not registered|does not exist/i.test(detail)
         ? "尚未安装照片连接器，请先运行 install.command"
-        : `连接器通信失败：${detail}` });
+        : `连接器通信失败：${detail}` };
+      progressUpdates.then(() => resolve(result), () => resolve(result));
     });
     port.postMessage(payload);
   });
@@ -44,7 +53,8 @@ async function runJob(payload) {
     if (status.code === "NATIVE_CONNECTION") result = status;
     else if (!status.ok || status.protocolVersion !== PROTOCOL_VERSION) {
       result = { ok: false, error: "本机连接器版本不匹配，请重新运行 install.command 后再试" };
-    } else result = await requestNative(payload);
+    } else result = await requestNative(payload, (progress) =>
+      chrome.storage.session.set({ connectorJob: { busy: true, payload, progress } }));
   } catch (error) {
     result = { ok: false, error: error.message || "连接器通信失败" };
   }

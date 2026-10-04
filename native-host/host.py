@@ -414,7 +414,7 @@ def import_to_photos(paths: list[Path], album_id: str = "") -> tuple[bool, int, 
     return True, imported_count, ""
 
 
-def process(message: dict) -> dict:
+def process(message: dict, on_progress=None) -> dict:
     action = message.get("action", "save")
     if action == "status":
         return {"ok": True, "protocolVersion": PROTOCOL_VERSION}
@@ -453,6 +453,12 @@ def process(message: dict) -> dict:
     if any(type(index) is not int or index <= 0 for index in indices) or len(set(indices)) != len(indices):
         return {"ok": False, "error": "图片编号无效或重复"}
 
+    def progress(phase, completed, total):
+        if on_progress:
+            on_progress({"event": "progress", "phase": phase, "completed": completed, "total": total})
+
+    progress("download", 0, len(items))
+
     cleanup_paths: list[Path] = []
     pairing_dirs: list[Path] = []
     import_groups: list[tuple[int, list[Path]]] = []
@@ -480,7 +486,7 @@ def process(message: dict) -> dict:
             title = title.strip(" .")[:60] or "小红书笔记"
             # A new directory per export prevents overwriting earlier saves.
             export_folder = Path(tempfile.mkdtemp(prefix=f"{title}-", dir=folder))
-        for index, item in zip(indices, items):
+        for completed, (index, item) in enumerate(zip(indices, items), start=1):
             fallback_detail = ""
             try:
                 if not isinstance(item, dict) or not allowed_url(item.get("url")):
@@ -562,10 +568,14 @@ def process(message: dict) -> dict:
                 })
             except Exception as error:
                 failures.append(f"第 {index} 张：{error}")
+            finally:
+                progress("download", completed, len(items))
 
         if export_folder is None:
             saved_indices = set()
-            for index, resources in import_groups:
+            if import_groups:
+                progress("import", 0, len(import_groups))
+            for completed, (index, resources) in enumerate(import_groups, start=1):
                 try:
                     imported, _, detail = import_to_photos(resources, album_id)
                     if not imported:
@@ -573,6 +583,8 @@ def process(message: dict) -> dict:
                     saved_indices.add(index)
                 except Exception as error:
                     failures.append(f"第 {index} 张：{error}")
+                finally:
+                    progress("import", completed, len(import_groups))
             downloaded = [item for item in downloaded if item["index"] in saved_indices]
         saved_count = len(downloaded)
         if not saved_count:
@@ -604,7 +616,7 @@ def process(message: dict) -> dict:
 
 def main() -> None:
     try:
-        send_message(process(read_message()))
+        send_message(process(read_message(), send_message))
     except EOFError:
         return
     except Exception as error:

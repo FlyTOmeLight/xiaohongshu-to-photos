@@ -108,6 +108,10 @@ function applySession() {
     elements.saveLabel.textContent = job.payload.action === "save"
       ? job.payload.destination === "folder" ? "正在保存…" : "正在导入…"
       : "请稍候…";
+    if (job.progress) {
+      const { phase, completed, total } = job.progress;
+      elements.saveLabel.textContent = `${phase === "import" ? "正在导入" : "正在处理"} ${completed}/${total}`;
+    }
   } else if (job?.result && job.payload.pageUrl === note.url) {
     if (job.payload.action === "save" || !job.result.ok) {
       showSaveResult(job.payload, job.result);

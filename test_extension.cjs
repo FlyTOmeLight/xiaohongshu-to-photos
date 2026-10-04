@@ -251,3 +251,25 @@ test("a restarted worker marks unfinished work interrupted without repeating it"
   assert.match(popup.controls.resultMessage.textContent, /中断/);
   assert.equal(app.requests.filter((request) => request.action === "save").length, 1);
 });
+
+test("progress messages keep the native port open and survive reopening", async () => {
+  const app = extension();
+  let popup = app.openPopup();
+  await until(() => popup.controls.imageGrid.children.length === 2);
+  void popup.controls.saveButton.click();
+  await until(() => app.ports.length === 1);
+  app.ports[0].reply({ event: "progress", phase: "download", completed: 1, total: 2 });
+  await until(() => app.data.connectorJob?.progress);
+  assert.equal(app.data.connectorJob.busy, true);
+  assert.equal(popup.controls.saveButton.disabled, true);
+  assert.match(popup.controls.saveButtonLabel.textContent, /1\/2/);
+  popup.close();
+  popup = app.openPopup();
+  await until(() => popup.controls.imageGrid.children.length === 2);
+  assert.match(popup.controls.saveButtonLabel.textContent, /1\/2/);
+  app.ports[0].reply({ event: "progress", phase: "import", completed: 0, total: 2 });
+  app.ports[0].reply({ ok: true, saved: 2 });
+  await until(() => !popup.controls.saveButton.disabled);
+  assert.equal(app.data.connectorJob.busy, false);
+  assert.match(popup.controls.resultMessage.textContent, /已导入 2 张/);
+});
