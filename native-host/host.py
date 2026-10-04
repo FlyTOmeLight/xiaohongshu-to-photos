@@ -440,21 +440,21 @@ def process(message: dict) -> dict:
     if not isinstance(items, list):
         return {"ok": False, "error": "缺少图片列表"}
 
-    urls = []
-    for item in items[:30]:
-        url = item.get("url", "") if isinstance(item, dict) else ""
-        if allowed_url(url):
-            urls.append(url)
-    if not urls:
-        return {"ok": False, "error": "没有有效的小红书图片地址"}
+    if not items:
+        return {"ok": False, "error": "缺少图片列表"}
+    if len(items) > 30:
+        return {"ok": False, "error": "单次最多保存 30 张，请减少勾选数量"}
+    indices = [item.get("index", position) if isinstance(item, dict) else position
+               for position, item in enumerate(items, start=1)]
+    if any(type(index) is not int or index <= 0 for index in indices) or len(set(indices)) != len(indices):
+        return {"ok": False, "error": "图片编号无效或重复"}
 
     cleanup_paths: list[Path] = []
     pairing_dirs: list[Path] = []
-    import_paths: list[Path] = []
+    import_groups: list[tuple[int, list[Path]]] = []
     downloaded: list[dict] = []
     failures: list[str] = []
-    live_fallback = 0
-    live_fallback_details: list[str] = []
+    fallback_details: dict[int, str] = {}
     page_live_urls: dict[str, list[str]] = {}
     page_live_error = ""
     export_folder: Path | None = None
@@ -463,7 +463,7 @@ def process(message: dict) -> dict:
         and item.get("kind") == "live"
         and not item.get("videoUrl")
         and not item.get("videoUrls")
-        for item in items[:30]
+        for item in items
     )
     if needs_live_lookup:
         try:
@@ -476,10 +476,12 @@ def process(message: dict) -> dict:
             title = title.strip(" .")[:60] or "小红书笔记"
             # A new directory per export prevents overwriting earlier saves.
             export_folder = Path(tempfile.mkdtemp(prefix=f"{title}-", dir=folder))
-        valid_items = [item for item in items[:30] if isinstance(item, dict) and allowed_url(item.get("url", ""))]
-        for index, item in enumerate(valid_items, start=1):
-            url = item["url"]
+        for index, item in zip(indices, items):
+            fallback_detail = ""
             try:
+                if not isinstance(item, dict) or not allowed_url(item.get("url")):
+                    raise ValueError("不允许的图片地址")
+                url = item["url"]
                 path, used_url, image_format = download_image(url)
                 cleanup_paths.append(path)
                 import_image_path = path
@@ -525,10 +527,7 @@ def process(message: dict) -> dict:
                     if media_kind != "live":
                         # No usable video: keep the still as a normal photo instead of
                         # failing the item, and report it so the popup can say so.
-                        live_fallback += 1
-                        live_fallback_details.append(
-                            f"第 {index} 张：{last_live_error or page_live_error or '没有实况视频地址'}"
-                        )
+                        fallback_detail = f"第 {index} 张：{last_live_error or page_live_error or '没有实况视频地址'}"
 
                 resource_paths = [import_image_path]
                 if is_live_item and media_kind == "live" and paired_video_path:
@@ -546,8 +545,10 @@ def process(message: dict) -> dict:
                                 exported.unlink()
                         raise
                 else:
-                    import_paths.extend(resource_paths)
+                    import_groups.append((index, resource_paths))
 
+                if fallback_detail:
+                    fallback_details[index] = fallback_detail
                 downloaded.append({
                     "index": index,
                     "url": used_url,
@@ -558,24 +559,31 @@ def process(message: dict) -> dict:
             except Exception as error:
                 failures.append(f"第 {index} 张：{error}")
 
-        if not downloaded:
-            return {"ok": False, "error": failures[0] if failures else "没有图片下载成功"}
-
-        if export_folder is not None:
-            saved_count = len(downloaded)
-        else:
-            imported, imported_count, detail = import_to_photos(import_paths, album_id)
-            if not imported:
-                return {"ok": False, "error": detail, "failed": len(urls)}
-            saved_count = min(imported_count, len(downloaded))
+        if export_folder is None:
+            saved_indices = set()
+            for index, resources in import_groups:
+                try:
+                    imported, _, detail = import_to_photos(resources, album_id)
+                    if not imported:
+                        raise RuntimeError(detail)
+                    saved_indices.add(index)
+                except Exception as error:
+                    failures.append(f"第 {index} 张：{error}")
+            downloaded = [item for item in downloaded if item["index"] in saved_indices]
+        saved_count = len(downloaded)
+        if not saved_count:
+            return {"ok": False, "error": "\n".join(failures) or "没有图片保存成功",
+                    "saved": 0, "failed": len(items), "failureDetails": failures}
+        live_fallback_details = [fallback_details[item["index"]] for item in downloaded
+                                 if item["index"] in fallback_details]
         return {
             "ok": True,
             "saved": saved_count,
-            "failed": len(failures) + max(0, len(downloaded) - saved_count),
+            "failed": len(items) - saved_count,
             "failureDetails": failures,
             "destination": destination,
             "folderPath": str(export_folder) if export_folder else "",
-            "liveFallback": live_fallback,
+            "liveFallback": len(live_fallback_details),
             "liveFallbackDetails": live_fallback_details,
             "items": downloaded,
         }

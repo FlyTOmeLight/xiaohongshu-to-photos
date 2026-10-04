@@ -218,8 +218,8 @@ function updateSelectionUi() {
   elements.count.textContent = `已选 ${count} / ${note.images.length} 张`;
   elements.toggleAll.textContent = count === note.images.length ? "取消全选" : "全部选择";
   const local = elements.destination.value === "folder";
-  elements.save.disabled = busy || count === 0 || (local && !folderPath);
-  if (!busy) elements.saveLabel.textContent = count ? `${local ? "保存" : "导入"} ${count} 张` : "请选择图片";
+  elements.save.disabled = busy || count === 0 || count > 30 || (local && !folderPath);
+  if (!busy) elements.saveLabel.textContent = count > 30 ? "最多选择 30 张" : count ? `${local ? "保存" : "导入"} ${count} 张` : "请选择图片";
   [elements.refresh, elements.retry, elements.toggleAll, elements.destination,
     elements.album, elements.loadAlbums, elements.chooseFolder].forEach((control) => {
     control.disabled = busy;
@@ -411,7 +411,7 @@ elements.chooseFolder.addEventListener("click", async () => {
 elements.save.addEventListener("click", async () => {
   if (busy) return;
   const images = note.images.filter((_, index) => selected.has(index));
-  if (!images.length) return;
+  if (!images.length || images.length > 30) return;
   const local = elements.destination.value === "folder";
   if (local && !folderPath) return;
 
@@ -427,12 +427,13 @@ elements.save.addEventListener("click", async () => {
       folderPath,
       title: note.title,
       pageUrl: note.url,
-      images: images.map((item) => ({
+      images: note.images.flatMap((item, index) => selected.has(index) ? [{
+        index: index + 1,
         url: item.url,
         kind: item.kind,
         videoUrl: item.videoUrl || "",
         videoUrls: Array.isArray(item.videoUrls) ? item.videoUrls : []
-      }))
+      }] : [])
     });
     if (!result?.ok) {
       throw new Error(result?.error || "保存失败");

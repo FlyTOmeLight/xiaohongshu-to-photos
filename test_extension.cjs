@@ -114,7 +114,7 @@ function extension() {
       subscriptions.forEach((listener) => listeners.delete(listener));
     } };
   }
-  return { data, ports, openPopup };
+  return { data, ports, openPopup, note };
 }
 
 test("toolbar opens the anchored popup with a fixed compact width", () => {
@@ -192,5 +192,27 @@ test("album results and native errors remain visible after reopening", async () 
   popup = app.openPopup();
   await until(() => popup.controls.imageGrid.children.length === 2);
   assert.match(popup.controls.resultMessage.textContent, /Native host has exited/);
+  assert.equal(popup.controls.saveButton.disabled, false);
+});
+
+
+test("sparse selections retain note indices and oversized selections cannot save", async () => {
+  const app = extension();
+  let popup = app.openPopup();
+  await until(() => popup.controls.imageGrid.children.length === 2);
+  popup.controls.imageGrid.children[0].click();
+  void popup.controls.saveButton.click();
+  await until(() => app.ports.length === 1);
+  assert.equal(app.ports[0].payload.images[0].index, 2);
+  app.ports[0].reply({ ok: true, saved: 1 });
+  await until(() => !popup.controls.saveButton.disabled);
+  popup.close();
+  app.note.url += "-other";
+  app.note.images = Array.from({ length: 31 }, () => ({ url: "https://ci.xiaohongshu.com/a" }));
+  popup = app.openPopup();
+  await until(() => popup.controls.imageGrid.children.length === 31);
+  assert.equal(popup.controls.saveButton.disabled, true);
+  assert.equal(popup.controls.saveButtonLabel.textContent, "最多选择 30 张");
+  popup.controls.imageGrid.children[0].click();
   assert.equal(popup.controls.saveButton.disabled, false);
 });
