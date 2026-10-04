@@ -128,6 +128,8 @@ def send_message(value: dict) -> None:
 
 
 def allowed_url(raw_url: str) -> bool:
+    if not isinstance(raw_url, str):
+        return False
     try:
         parsed = urllib.parse.urlsplit(raw_url)
     except ValueError:
@@ -182,7 +184,17 @@ def sniff_format(data: bytes) -> str | None:
     return None
 
 
+class AllowedRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, message, headers, new_url):
+        if not allowed_url(new_url):
+            response.close()
+            raise ValueError("不允许的下载重定向地址")
+        return super().redirect_request(request, response, code, message, headers, new_url)
+
+
 def fetch_url(url: str, accept: str) -> bytes:
+    if not allowed_url(url):
+        raise ValueError("不允许的下载地址")
     request = urllib.request.Request(
         url,
         headers={
@@ -194,7 +206,8 @@ def fetch_url(url: str, accept: str) -> bytes:
             "Referer": "https://www.xiaohongshu.com/",
         },
     )
-    with urllib.request.urlopen(request, timeout=30) as response:
+    opener = urllib.request.build_opener(AllowedRedirectHandler())
+    with opener.open(request, timeout=30) as response:
         content_length = int(response.headers.get("Content-Length") or 0)
         if content_length > MAX_IMAGE_BYTES:
             raise ValueError("图片超过 80 MB")
