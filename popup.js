@@ -13,13 +13,25 @@ const elements = {
   toggleAll: document.querySelector("#toggleAllButton"),
   save: document.querySelector("#saveButton"),
   saveLabel: document.querySelector("#saveButtonLabel"),
-  toast: document.querySelector("#toast")
+  toast: document.querySelector("#toast"),
+  destination: document.querySelector("#destinationSelect"),
+  albumSettings: document.querySelector("#albumSettings"),
+  album: document.querySelector("#albumSelect"),
+  loadAlbums: document.querySelector("#loadAlbumsButton"),
+  folderSettings: document.querySelector("#folderSettings"),
+  chooseFolder: document.querySelector("#chooseFolderButton"),
+  folderPath: document.querySelector("#folderPath"),
+  destinationHint: document.querySelector("#destinationHint"),
+  result: document.querySelector("#resultMessage")
 };
 
 let note = { title: "小红书笔记", images: [] };
 let selected = new Set();
 let toastTimer;
-const NATIVE_HOST = "com.rednote.photosaver";
+let busy = false;
+let folderPath = "";
+let sourceTabId;
+let session = {};
 
 function collectRuntimeNote() {
   const state = window.__INITIAL_STATE__;
@@ -112,17 +124,73 @@ function bestNoteResult(candidates, tabUrl) {
   })[0] || null;
 }
 
-function sendToPhotosConnector(payload) {
-  return new Promise((resolve, reject) => {
-    chrome.runtime.sendNativeMessage(NATIVE_HOST, payload, (response) => {
-      const runtimeError = chrome.runtime.lastError;
-      if (runtimeError) {
-        reject(new Error("尚未安装照片连接器，请先运行 install.command"));
-        return;
-      }
-      resolve(response || { ok: false, error: "本机连接器没有返回结果" });
-    });
+function rememberDraft() {
+  return chrome.storage.session.set({ popupDraft: {
+    pageUrl: note.url,
+    selected: [...selected],
+    destination: elements.destination.value,
+    albumId: elements.album.value
+  } });
+}
+
+async function sendToConnector(payload) {
+  await rememberDraft();
+  return chrome.runtime.sendMessage({
+    type: "CONNECTOR_REQUEST",
+    payload: { ...payload, pageUrl: note.url,
+      albumName: elements.album.selectedOptions[0]?.textContent || "" }
   });
+}
+
+function updateDestinationUi() {
+  const local = elements.destination.value === "folder";
+  elements.albumSettings.classList.toggle("hidden", local);
+  elements.folderSettings.classList.toggle("hidden", !local);
+  elements.destinationHint.textContent = local
+    ? "选择文件夹后若弹窗关闭，再点扩展即可继续"
+    : "原图、GIF、实况 · 可同步 iCloud";
+}
+
+function showSaveResult(payload, result, toast = false) {
+  if (!result.ok) {
+    elements.result.textContent = result.error || "保存失败，请稍后再试";
+  } else {
+    const local = payload.destination === "folder";
+    const target = local ? "本地文件夹" : payload.albumId ? `相簿“${payload.albumName}”` : "“照片”";
+    const failedText = result.failed ? `，${result.failed} 张失败` : "";
+    const fallbackText = result.liveFallback ? `，${result.liveFallback} 张仅保存静态图` : "";
+    const summary = `已${local ? "保存" : "导入"} ${result.saved} 张到${target}${failedText}${fallbackText}`;
+    elements.result.textContent = [summary, ...(result.failureDetails || []),
+      ...(result.liveFallbackDetails || []), local ? result.folderPath : ""].filter(Boolean).join("\n");
+  }
+  elements.result.classList.remove("hidden");
+  if (toast) showToast(elements.result.textContent, 6000);
+}
+
+function applySession() {
+  folderPath = session.folderPath || "";
+  elements.folderPath.textContent = folderPath || "尚未选择文件夹";
+  elements.folderPath.title = folderPath;
+  elements.chooseFolder.textContent = folderPath ? "更改文件夹…" : "选择文件夹…";
+  if (Array.isArray(session.albums)) {
+    const previous = elements.album.value;
+    elements.album.replaceChildren(new Option("图库（不指定相簿）", ""));
+    session.albums.forEach((album) => elements.album.add(new Option(album.name, album.id)));
+    elements.album.value = [...elements.album.options].some((option) => option.value === previous) ? previous : "";
+    elements.loadAlbums.textContent = "刷新相簿";
+  }
+  const job = session.connectorJob;
+  busy = Boolean(job?.busy);
+  updateSelectionUi();
+  if (busy) {
+    elements.saveLabel.textContent = job.payload.action === "save"
+      ? job.payload.destination === "folder" ? "正在保存…" : "正在导入…"
+      : "请稍候…";
+  } else if (job?.result && job.payload.pageUrl === note.url) {
+    if (job.payload.action === "save" || !job.result.ok) {
+      showSaveResult(job.payload, job.result);
+    }
+  }
 }
 
 function setView(view) {
@@ -149,9 +217,16 @@ function updateSelectionUi() {
   const count = selected.size;
   elements.count.textContent = `已选 ${count} / ${note.images.length} 张`;
   elements.toggleAll.textContent = count === note.images.length ? "取消全选" : "全部选择";
-  elements.save.disabled = count === 0;
-  elements.saveLabel.textContent = count ? `导入 ${count} 张` : "请选择图片";
+  const local = elements.destination.value === "folder";
+  elements.save.disabled = busy || count === 0 || (local && !folderPath);
+  if (!busy) elements.saveLabel.textContent = count ? `${local ? "保存" : "导入"} ${count} 张` : "请选择图片";
+  [elements.refresh, elements.retry, elements.toggleAll, elements.destination,
+    elements.album, elements.loadAlbums, elements.chooseFolder].forEach((control) => {
+    control.disabled = busy;
+  });
+  elements.actionBar.setAttribute("aria-busy", String(busy));
   [...elements.grid.children].forEach((button, index) => {
+    button.disabled = busy;
     button.setAttribute("aria-pressed", String(selected.has(index)));
   });
 }
@@ -188,8 +263,10 @@ function renderGallery() {
 
     button.append(image, check, number, badge);
     button.addEventListener("click", () => {
+      if (busy) return;
       selected.has(index) ? selected.delete(index) : selected.add(index);
       updateSelectionUi();
+      void rememberDraft();
     });
     elements.grid.append(button);
   });
@@ -198,16 +275,19 @@ function renderGallery() {
   setView("gallery");
 }
 
-async function getActiveTab() {
+async function getSourceTab() {
+  if (sourceTabId) return chrome.tabs.get(sourceTabId);
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  sourceTabId = tab?.id;
   return tab;
 }
 
 async function collect() {
+  elements.result.classList.add("hidden");
   setView("loading");
   elements.refresh.disabled = true;
   try {
-    const tab = await getActiveTab();
+    const tab = await getSourceTab();
     if (!tab?.id || !/^https?:\/\/([\w-]+\.)*xiaohongshu\.com\//i.test(tab.url || "")) {
       setEmpty("这不是小红书页面", "请先在网页版小红书打开一篇图文笔记，然后再试一次。");
       return;
@@ -245,31 +325,106 @@ async function collect() {
       images: response.images
     };
     selected = new Set(note.images.map((_, index) => index));
+    const draft = session.popupDraft;
+    if (draft?.pageUrl === note.url) {
+      selected = new Set(draft.selected.filter((index) => index >= 0 && index < note.images.length));
+      elements.destination.value = draft.destination;
+      if ([...elements.album.options].some((option) => option.value === draft.albumId)) {
+        elements.album.value = draft.albumId;
+      }
+    }
+    updateDestinationUi();
     renderGallery();
+    applySession();
   } catch (error) {
     setEmpty("读取失败", error?.message || "请刷新小红书页面后重试。");
   } finally {
-    elements.refresh.disabled = false;
+    elements.refresh.disabled = busy;
   }
 }
 
 elements.refresh.addEventListener("click", collect);
 elements.retry.addEventListener("click", collect);
 elements.toggleAll.addEventListener("click", () => {
+  if (busy) return;
   selected = selected.size === note.images.length
     ? new Set()
     : new Set(note.images.map((_, index) => index));
   updateSelectionUi();
+  void rememberDraft();
+});
+
+elements.destination.addEventListener("change", () => {
+  updateDestinationUi();
+  elements.result.classList.add("hidden");
+  updateSelectionUi();
+  void rememberDraft();
+});
+elements.album.addEventListener("change", () => { void rememberDraft(); });
+
+elements.loadAlbums.addEventListener("click", async () => {
+  if (busy) return;
+  busy = true;
+  updateSelectionUi();
+  elements.loadAlbums.textContent = "正在读取…";
+  try {
+    const result = await sendToConnector({ action: "listAlbums" });
+    if (!result.ok) throw new Error(result.error || "无法读取相簿");
+    if (!Array.isArray(result.albums)) throw new Error("请重新运行 install.command 更新连接器");
+    const previous = elements.album.value;
+    elements.album.replaceChildren(new Option("图库（不指定相簿）", ""));
+    result.albums.forEach((album) => elements.album.add(new Option(album.name, album.id)));
+    elements.album.value = [...elements.album.options].some((option) => option.value === previous) ? previous : "";
+    if (!result.albums.length) showToast("还没有可选相簿，请先在“照片”中创建相簿");
+  } catch (error) {
+    showToast(error.message, 6000);
+  } finally {
+    busy = false;
+    elements.loadAlbums.textContent = "刷新相簿";
+    updateSelectionUi();
+  }
+});
+
+elements.chooseFolder.addEventListener("click", async () => {
+  if (busy) return;
+  busy = true;
+  updateSelectionUi();
+  elements.chooseFolder.textContent = "正在选择…";
+  try {
+    const result = await sendToConnector({ action: "chooseFolder" });
+    if (!result.ok) throw new Error(result.error || "无法选择文件夹");
+    if (!result.cancelled) {
+      if (!result.path) throw new Error("请重新运行 install.command 更新连接器");
+      folderPath = result.path;
+      elements.folderPath.textContent = folderPath;
+      elements.folderPath.title = folderPath;
+    }
+  } catch (error) {
+    showToast(error.message, 6000);
+  } finally {
+    busy = false;
+    elements.chooseFolder.textContent = folderPath ? "更改文件夹…" : "选择文件夹…";
+    updateSelectionUi();
+  }
 });
 
 elements.save.addEventListener("click", async () => {
+  if (busy) return;
   const images = note.images.filter((_, index) => selected.has(index));
   if (!images.length) return;
+  const local = elements.destination.value === "folder";
+  if (local && !folderPath) return;
 
-  elements.save.disabled = true;
-  elements.saveLabel.textContent = "正在导入…";
+  busy = true;
+  elements.result.classList.add("hidden");
+  updateSelectionUi();
+  elements.saveLabel.textContent = local ? "正在保存…" : "正在导入…";
   try {
-    const result = await sendToPhotosConnector({
+    const result = await sendToConnector({
+      action: "save",
+      destination: elements.destination.value,
+      albumId: elements.album.value,
+      folderPath,
       title: note.title,
       pageUrl: note.url,
       images: images.map((item) => ({
@@ -280,19 +435,30 @@ elements.save.addEventListener("click", async () => {
       }))
     });
     if (!result?.ok) {
-      throw new Error(result?.error || "照片导入失败");
+      throw new Error(result?.error || "保存失败");
     }
-    const failedText = result.failed ? `，${result.failed} 张失败` : "";
-    const fallbackText = result.liveFallback ? `，${result.liveFallback} 张仅保存静态图` : "";
-    const fallbackDetail = result.liveFallbackDetails?.[0] ? `（${result.liveFallbackDetails[0]}）` : "";
-    showToast(`已导入 ${result.saved} 张到“照片”${failedText}${fallbackText}${fallbackDetail}`,
-      result.liveFallback ? 8000 : 2400);
-    elements.saveLabel.textContent = "导入完成";
-    setTimeout(updateSelectionUi, 1200);
+    showSaveResult({ destination: elements.destination.value, albumId: elements.album.value,
+      albumName: elements.album.selectedOptions[0]?.textContent || "" }, result, true);
   } catch (error) {
-    showToast(error?.message || "导入失败，请稍后再试", 6000);
+    elements.result.textContent = error?.message || "保存失败，请稍后再试";
+    elements.result.classList.remove("hidden");
+    showToast(elements.result.textContent, 6000);
+  } finally {
+    busy = false;
     updateSelectionUi();
   }
 });
 
-collect();
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "session") return;
+  for (const [key, change] of Object.entries(changes)) session[key] = change.newValue;
+  if (changes.connectorJob || changes.folderPath || changes.albums) applySession();
+});
+
+async function initialize() {
+  session = await chrome.storage.session.get(["popupDraft", "folderPath", "albums", "connectorJob"]);
+  applySession();
+  await collect();
+}
+
+initialize().catch((error) => setEmpty("读取失败", error.message || "请重新打开扩展"));

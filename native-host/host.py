@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Native Messaging host: download selected XHS images and import them to Photos."""
+"""Native Messaging host: save selected XHS images to Photos or a local folder."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import contextlib
 import json
 import os
 import re
+import shutil
 import struct
 import subprocess
 import sys
@@ -26,17 +27,72 @@ ALLOWED_HOST_SUFFIXES = (
 
 IMPORT_SCRIPT = r'''
 on run argv
+  set albumId to item 1 of argv
   set filesToImport to {}
-  repeat with filePath in argv
+  repeat with filePath in items 2 thru -1 of argv
     set end of filesToImport to POSIX file (contents of filePath)
   end repeat
-  -- Do not "activate" Photos here. Stealing focus closes the Chrome popup
-  -- before it can report the result, so the user sees nothing at all.
-  -- The import itself does not need the app to be frontmost.
-  tell application "Photos" to set importedItems to import (filesToImport)
+  -- Import in the background so the user can keep viewing the save window.
+  tell application "Photos"
+    if albumId is "" then
+      set importedItems to import (filesToImport)
+    else
+      set targetAlbum to album id albumId
+      set importedItems to import (filesToImport) into targetAlbum
+    end if
+  end tell
   return count of importedItems
 end run
 '''
+
+ALBUMS_SCRIPT = r'''
+use framework "Foundation"
+use scripting additions
+set rows to current application's NSMutableArray's array()
+tell application "Photos"
+  repeat with targetAlbum in every album
+    set albumId to id of targetAlbum
+    set albumName to name of targetAlbum
+    set row to current application's NSMutableDictionary's dictionary()
+    row's setObject:albumId forKey:"id"
+    row's setObject:albumName forKey:"name"
+    rows's addObject:row
+  end repeat
+end tell
+set jsonData to current application's NSJSONSerialization's dataWithJSONObject:rows options:0 |error|:(missing value)
+set jsonText to current application's NSString's alloc()'s initWithData:jsonData encoding:(current application's NSUTF8StringEncoding)
+return jsonText as text
+'''
+
+FOLDER_SCRIPT = r'''
+try
+  return POSIX path of (choose folder with prompt "选择红薯收藏夹的保存文件夹")
+on error number -128
+  return ""
+end try
+'''
+
+
+def list_albums() -> dict:
+    result = subprocess.run(
+        ["/usr/bin/osascript", "-e", ALBUMS_SCRIPT],
+        capture_output=True, text=True, timeout=120, check=False,
+    )
+    if result.returncode != 0:
+        return {"ok": False, "error": result.stderr.strip() or "无法读取照片相簿"}
+    albums = json.loads(result.stdout)
+    return {"ok": True, "albums": sorted(albums, key=lambda album: album["name"].casefold())}
+
+
+def choose_folder() -> dict:
+    result = subprocess.run(
+        ["/usr/bin/osascript", "-e", FOLDER_SCRIPT],
+        capture_output=True, text=True, timeout=300, check=False,
+    )
+    if result.returncode != 0:
+        return {"ok": False, "error": result.stderr.strip() or "无法选择文件夹"}
+    path = result.stdout.strip()
+    return {"ok": True, "cancelled": not path, "path": path}
 
 
 def read_exact(size: int) -> bytes:
@@ -323,9 +379,9 @@ def convert_live_image_to_jpeg(image_path: Path) -> Path:
     return output_path
 
 
-def import_to_photos(paths: list[Path]) -> tuple[bool, int, str]:
+def import_to_photos(paths: list[Path], album_id: str = "") -> tuple[bool, int, str]:
     result = subprocess.run(
-        ["/usr/bin/osascript", "-e", IMPORT_SCRIPT, *map(str, paths)],
+        ["/usr/bin/osascript", "-e", IMPORT_SCRIPT, album_id, *map(str, paths)],
         capture_output=True,
         text=True,
         timeout=120,
@@ -344,6 +400,29 @@ def import_to_photos(paths: list[Path]) -> tuple[bool, int, str]:
 
 
 def process(message: dict) -> dict:
+    action = message.get("action", "save")
+    if action == "listAlbums":
+        return list_albums()
+    if action == "chooseFolder":
+        return choose_folder()
+    if action != "save":
+        return {"ok": False, "error": "不支持的操作"}
+
+    destination = message.get("destination", "photos")
+    if destination not in {"photos", "folder"}:
+        return {"ok": False, "error": "不支持的保存位置"}
+    album_id = message.get("albumId", "")
+    if not isinstance(album_id, str):
+        return {"ok": False, "error": "无效的相簿标识"}
+    folder = None
+    if destination == "folder":
+        raw_path = message.get("folderPath")
+        if not isinstance(raw_path, str) or not raw_path or not Path(raw_path).is_absolute():
+            return {"ok": False, "error": "请先选择本地文件夹"}
+        folder = Path(raw_path)
+        if not folder.is_dir():
+            return {"ok": False, "error": "保存文件夹不存在，请重新选择"}
+
     items = message.get("images")
     if not isinstance(items, list):
         return {"ok": False, "error": "缺少图片列表"}
@@ -364,6 +443,7 @@ def process(message: dict) -> dict:
     live_fallback_details: list[str] = []
     page_live_urls: dict[str, list[str]] = {}
     page_live_error = ""
+    export_folder: Path | None = None
     needs_live_lookup = any(
         isinstance(item, dict)
         and item.get("kind") == "live"
@@ -377,6 +457,11 @@ def process(message: dict) -> dict:
         except Exception as error:
             page_live_error = str(error)
     try:
+        if folder is not None:
+            title = re.sub(r'[\x00-\x1f/:\\]', "_", str(message.get("title") or "小红书笔记"))
+            title = title.strip(" .")[:60] or "小红书笔记"
+            # A new directory per export prevents overwriting earlier saves.
+            export_folder = Path(tempfile.mkdtemp(prefix=f"{title}-", dir=folder))
         valid_items = [item for item in items[:30] if isinstance(item, dict) and allowed_url(item.get("url", ""))]
         for index, item in enumerate(valid_items, start=1):
             url = item["url"]
@@ -428,9 +513,23 @@ def process(message: dict) -> dict:
                             f"第 {index} 张：{last_live_error or page_live_error or '没有实况视频地址'}"
                         )
 
-                import_paths.append(import_image_path)
+                resource_paths = [import_image_path]
                 if is_live_item and media_kind == "live" and paired_video_path:
-                    import_paths.append(paired_video_path)
+                    resource_paths.append(paired_video_path)
+                if export_folder is not None:
+                    exported_paths: list[Path] = []
+                    try:
+                        for resource in resource_paths:
+                            exported = export_folder / f"{index:02d}{resource.suffix}"
+                            exported_paths.append(exported)
+                            shutil.copyfile(resource, exported)
+                    except Exception:
+                        for exported in exported_paths:
+                            with contextlib.suppress(OSError):
+                                exported.unlink()
+                        raise
+                else:
+                    import_paths.extend(resource_paths)
 
                 downloaded.append({
                     "index": index,
@@ -442,23 +541,31 @@ def process(message: dict) -> dict:
             except Exception as error:
                 failures.append(f"第 {index} 张：{error}")
 
-        if not import_paths:
+        if not downloaded:
             return {"ok": False, "error": failures[0] if failures else "没有图片下载成功"}
 
-        imported, imported_count, detail = import_to_photos(import_paths)
-        if not imported:
-            return {"ok": False, "error": detail, "failed": len(urls)}
-
-        saved_count = min(imported_count, len(downloaded))
+        if export_folder is not None:
+            saved_count = len(downloaded)
+        else:
+            imported, imported_count, detail = import_to_photos(import_paths, album_id)
+            if not imported:
+                return {"ok": False, "error": detail, "failed": len(urls)}
+            saved_count = min(imported_count, len(downloaded))
         return {
             "ok": True,
             "saved": saved_count,
             "failed": len(failures) + max(0, len(downloaded) - saved_count),
+            "failureDetails": failures,
+            "destination": destination,
+            "folderPath": str(export_folder) if export_folder else "",
             "liveFallback": live_fallback,
             "liveFallbackDetails": live_fallback_details,
             "items": downloaded,
         }
     finally:
+        if export_folder is not None:
+            with contextlib.suppress(OSError):
+                export_folder.rmdir()  # Remove an empty directory when every item failed.
         for path in cleanup_paths:
             with contextlib.suppress(OSError):
                 path.unlink()

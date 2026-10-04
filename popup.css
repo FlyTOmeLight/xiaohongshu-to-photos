@@ -22,7 +22,8 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Helvetica Neue", sans-serif;
 }
 
-button { font: inherit; }
+button, select { font: inherit; }
+button:focus-visible, select:focus-visible { outline: 2px solid var(--red); outline-offset: 3px; }
 .hidden { display: none !important; }
 .shell { min-height: 520px; display: flex; flex-direction: column; }
 
@@ -107,7 +108,7 @@ button { font: inherit; }
   cursor: pointer;
 }
 
-.gallery { padding: 3px 18px 98px; }
+.gallery { padding: 3px 18px 240px; }
 .note-info { padding: 5px 2px 13px; }
 .note-title { margin: 0 0 10px; font-size: 14px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .selection-row { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; }
@@ -160,6 +161,7 @@ button { font: inherit; }
   right: 0;
   bottom: 0;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -169,13 +171,20 @@ button { font: inherit; }
   box-shadow: 0 -10px 35px rgba(61, 43, 34, 0.06);
   backdrop-filter: blur(18px);
 }
-.destination { display: flex; align-items: center; gap: 9px; min-width: 0; }
-.photos-dot { width: 29px; height: 29px; border-radius: 9px; background: conic-gradient(#ff3f65, #ffb730, #70cb5b, #32bccc, #6b73e9, #d348bf, #ff3f65); box-shadow: inset 0 0 0 7px white; flex: 0 0 auto; }
-.destination strong, .destination small { display: block; }
-.destination strong { font-size: 11px; }
-.destination small { margin-top: 3px; color: var(--muted); font-size: 9px; white-space: nowrap; }
+.destination-settings { width: 100%; font-size: 12px; }
+.destination-settings > label { margin-right: 10px; }
+.destination-settings select { min-width: 0; max-width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: white; color: var(--ink); }
+.target-settings { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.target-settings label { flex: 0 0 auto; }
+.target-settings select { flex: 1; width: 0; }
+.target-button { flex: 0 0 auto; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: white; color: var(--red-dark); cursor: pointer; font-size: 12px; }
+.target-button:disabled { opacity: .55; cursor: default; }
+.folder-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #625d58; }
+.destination-hint { margin: 10px 0 0; color: #625d58; line-height: 1.5; }
+.result-message { position: fixed; z-index: 6; left: 17px; right: 169px; bottom: 16px; margin: 0; max-height: 58px; overflow: auto; color: var(--ink); font-size: 12px; line-height: 1.5; white-space: pre-line; }
 
 .save-button {
+  margin-left: auto;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -200,7 +209,7 @@ button { font: inherit; }
   position: fixed;
   z-index: 9;
   left: 50%;
-  bottom: 79px;
+  bottom: 210px;
   max-width: calc(100% - 36px);
   transform: translate(-50%, 14px);
   padding: 10px 15px;
@@ -216,3 +225,7 @@ button { font: inherit; }
   transition: 180ms ease;
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+@media (prefers-reduced-motion: reduce) {
+  .loader i { animation: none; }
+  .toast { transition: none; }
+}
