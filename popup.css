@@ -13,6 +13,7 @@
 body {
   margin: 0;
   width: 420px;
+  max-width: 100%;
   min-height: 520px;
   background:
     radial-gradient(circle at 93% 5%, rgba(255, 197, 79, 0.18), transparent 24%),
