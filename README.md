@@ -280,3 +280,7 @@ Full license texts are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 请只保存你有权使用的图片，并尊重作者版权和平台规则。
 Please only save images you have the right to use, and respect creators' rights and platform rules.
+
+### 实况照片验证
+
+配对后使用 macOS 的 `PHLivePhoto` 加载资源。加载失败时保留原静态图，并在结果中说明原因。自动检查生成真实 JPEG 和 H.264 视频，覆盖配对、系统加载及损坏视频拒绝。检查不会写入个人照片图库。Photos 内的导入、按住播放和 iCloud 同步仍需在实际图库中人工验收。

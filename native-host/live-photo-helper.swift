@@ -1,7 +1,10 @@
+import AppKit
+
 import AVFoundation
 import CoreMedia
 import Foundation
 import ImageIO
+import Photos
 
 enum LivePhotoError: LocalizedError {
     case invalidImage
@@ -112,6 +115,27 @@ func videoIdentifier(at url: URL) -> String? {
     }?.stringValue
 }
 
+func validateLivePhoto(imageURL: URL, videoURL: URL) throws {
+    var finished = false
+    var loadError: Error?
+    let request = PHLivePhoto.request(withResourceFileURLs: [imageURL, videoURL],
+        placeholderImage: nil, targetSize: .zero, contentMode: .aspectFit) { photo, info in
+        if (info[PHLivePhotoInfoIsDegradedKey] as? Bool) == true { return }
+        loadError = photo == nil ? (info[PHLivePhotoInfoErrorKey] as? Error
+            ?? LivePhotoError.metadataVerificationFailed) : nil
+        finished = true
+    }
+    let deadline = Date().addingTimeInterval(30)
+    while !finished && Date() < deadline {
+        RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+    }
+    if !finished {
+        PHLivePhoto.cancelRequest(withRequestID: request)
+        throw LivePhotoError.videoExportFailed("系统加载实况照片超时")
+    }
+    if let error = loadError { throw error }
+}
+
 func run() throws {
     guard CommandLine.arguments.count == 3 else {
         throw NSError(
@@ -130,6 +154,7 @@ func run() throws {
           videoIdentifier(at: videoURL) == identifier else {
         throw LivePhotoError.metadataVerificationFailed
     }
+    try validateLivePhoto(imageURL: imageURL, videoURL: videoURL)
     print(identifier)
 }
 

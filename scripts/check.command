@@ -41,6 +41,18 @@ if len(response) < 4 or struct.unpack('@I', response[:4])[0] != len(response[4:]
     raise RuntimeError('Installed connector returned an invalid native frame')
 if json.loads(response[4:]) != {'ok': True, 'protocolVersion': 2}:
     raise RuntimeError('Installed connector returned an unexpected protocol version')
+# Exercise real media without writing to the user's Photos library.
+compiler = subprocess.check_output(['/usr/bin/xcrun', '--sdk', 'macosx', '--find', 'swiftc'], text=True).strip()
+sdk = subprocess.check_output(['/usr/bin/xcrun', '--sdk', 'macosx', '--show-sdk-path'], text=True).strip()
+fixture = work / 'fixture'
+subprocess.run([compiler, '-sdk', sdk, 'scripts/live-photo-fixture.swift', '-o', str(fixture)], check=True)
+subprocess.run([str(fixture), str(work)], check=True, timeout=30)
+helper = work / 'connector/live-photo-helper'
+subprocess.run([str(helper), str(work / 'image.jpg'), str(work / 'video.mov')], check=True, timeout=45)
+(work / 'broken.mov').write_bytes(b'not a video')
+broken = subprocess.run([str(helper), str(work / 'image.jpg'), str(work / 'broken.mov')], capture_output=True, timeout=45)
+if broken.returncode == 0:
+    raise RuntimeError('Live Photo helper accepted a corrupt video')
 PY
 git diff --check
 print '所有检查通过。'
