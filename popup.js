@@ -56,6 +56,13 @@ function rememberDraft() {
   } });
 }
 
+function rememberDestination() {
+  return chrome.storage.local.set({ destinationPreferences: {
+    destination: elements.destination.value, albumId: elements.album.value,
+    albumName: elements.album.selectedOptions[0]?.textContent || ""
+  } });
+}
+
 async function sendToConnector(payload) {
   await rememberDraft();
   return chrome.runtime.sendMessage({
@@ -312,8 +319,9 @@ elements.destination.addEventListener("change", () => {
   elements.result.classList.add("hidden");
   updateSelectionUi();
   void rememberDraft();
+  void rememberDestination();
 });
-elements.album.addEventListener("change", () => { void rememberDraft(); });
+elements.album.addEventListener("change", () => { void rememberDraft(); void rememberDestination(); });
 
 elements.loadAlbums.addEventListener("click", async () => {
   if (busy) return;
@@ -328,6 +336,7 @@ elements.loadAlbums.addEventListener("click", async () => {
     elements.album.replaceChildren(new Option("图库（不指定相簿）", ""));
     result.albums.forEach((album) => elements.album.add(new Option(album.name, album.id)));
     elements.album.value = [...elements.album.options].some((option) => option.value === previous) ? previous : "";
+    await rememberDestination();
     if (!result.albums.length) showToast("还没有可选相簿，请先在“照片”中创建相簿");
   } catch (error) {
     showToast(error.message, 6000);
@@ -413,6 +422,16 @@ async function initialize() {
   const state = await chrome.runtime.sendMessage({ type: "CONNECTOR_STATE" });
   if (!state?.ok) throw new Error(state?.error || "无法读取后台任务状态");
   session = await chrome.storage.session.get(["popupDraft", "folderPath", "albums", "connectorJob"]);
+  const local = await chrome.storage.local.get(["destinationPreferences", "folderPath"]);
+  if (!session.folderPath) session.folderPath = local.folderPath || "";
+  const preferences = local.destinationPreferences;
+  if (preferences) {
+    elements.destination.value = preferences.destination === "folder" ? "folder" : "photos";
+    if (preferences.albumId) {
+      elements.album.add(new Option(preferences.albumName || "上次使用的相簿", preferences.albumId));
+      elements.album.value = preferences.albumId;
+    }
+  }
   applySession();
   await collect();
 }

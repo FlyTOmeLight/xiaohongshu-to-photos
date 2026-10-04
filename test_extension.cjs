@@ -42,11 +42,16 @@ class Control {
 
 function extension({ statusResult = { ok: true, protocolVersion: 2 } } = {}) {
   const data = {};
+  const localData = {};
   const listeners = new Set();
   const ports = [];
   const requests = [];
   let handleMessage;
   const storage = {
+    local: {
+      get: async () => structuredClone(localData),
+      set: async (values) => Object.assign(localData, structuredClone(values))
+    },
     session: {
       get: async () => structuredClone(data),
       set: async (values) => {
@@ -100,7 +105,7 @@ function extension({ statusResult = { ok: true, protocolVersion: 2 } } = {}) {
     const subscriptions = [];
     let closed = false;
     const chrome = {
-      storage: { session: storage.session, onChanged: { addListener: (listener) => {
+      storage: { session: storage.session, local: storage.local, onChanged: { addListener: (listener) => {
         subscriptions.push(listener); listeners.add(listener);
       } } },
       runtime: { sendMessage: (message) => new Promise((resolve) => {
@@ -122,7 +127,7 @@ function extension({ statusResult = { ok: true, protocolVersion: 2 } } = {}) {
       subscriptions.forEach((listener) => listeners.delete(listener));
     } };
   }
-  return { data, ports, openPopup, note, requests, restartWorker };
+  return { data, localData, ports, openPopup, note, requests, restartWorker };
 }
 
 test("toolbar opens the anchored popup with a fixed compact width", () => {
@@ -302,3 +307,26 @@ for (const allFailed of [false, true]) {
     assert.equal(popup.controls.retryFailedButton.classList.contains('hidden'), true);
   });
 }
+
+test('destination preferences survive a browser session reset and another note', async () => {
+  const app = extension();
+  app.localData.destinationPreferences = { destination: 'photos', albumId: 'album-a', albumName: '旅行' };
+  let popup = app.openPopup();
+  await until(() => popup.controls.imageGrid.children.length === 2);
+  assert.equal(popup.controls.albumSelect.value, 'album-a');
+  popup.controls.destinationSelect.value = 'folder';
+  popup.controls.destinationSelect.handlers.change();
+  void popup.controls.chooseFolderButton.click();
+  await until(() => app.ports.length === 1);
+  app.ports[0].reply({ ok: true, path: '/tmp/persistent-folder' });
+  await until(() => app.localData.folderPath);
+  popup.close();
+  Object.keys(app.data).forEach((key) => delete app.data[key]);
+  app.note.url += '-another';
+  app.restartWorker();
+  popup = app.openPopup();
+  await until(() => popup.controls.imageGrid.children.length === 2);
+  assert.equal(popup.controls.destinationSelect.value, 'folder');
+  assert.equal(popup.controls.folderPath.textContent, '/tmp/persistent-folder');
+  assert.equal(popup.controls.imageCount.textContent, '已选 2 / 2 张');
+});

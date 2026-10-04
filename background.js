@@ -61,6 +61,7 @@ async function runJob(payload) {
   const updates = { connectorJob: { busy: false, payload, result } };
   if (result.ok && payload.action === "chooseFolder" && !result.cancelled && result.path) {
     updates.folderPath = result.path;
+    await chrome.storage.local.set({ folderPath: result.path });
   }
   if (result.ok && payload.action === "listAlbums" && Array.isArray(result.albums)) {
     updates.albums = result.albums;
