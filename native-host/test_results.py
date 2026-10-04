@@ -65,3 +65,10 @@ class SaveResultTests(MediaTestCase):
         with mock.patch.object(host, 'fetch_url', return_value=page.encode()):
             result = host.live_video_map_from_page('https://www.xiaohongshu.com/explore/current123')
         self.assertEqual(result['undefined-image'], ['https://sns-video-bd.xhscdn.com/undefined-video'])
+
+    def test_protocol_check_is_read_only(self):
+        with mock.patch.object(host, 'download_image') as download, mock.patch.object(host, 'import_to_photos') as photos:
+            result = host.process({'action': 'status'})
+        self.assertEqual(result, {'ok': True, 'protocolVersion': 2})
+        download.assert_not_called()
+        photos.assert_not_called()

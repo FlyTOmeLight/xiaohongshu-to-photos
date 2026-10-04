@@ -40,10 +40,11 @@ class Control {
   click() { return this.disabled ? undefined : this.handlers.click(); }
 }
 
-function extension() {
+function extension({ statusResult = { ok: true, protocolVersion: 2 } } = {}) {
   const data = {};
   const listeners = new Set();
   const ports = [];
+  const requests = [];
   let handleMessage;
   const storage = {
     session: {
@@ -66,7 +67,12 @@ function extension() {
       const port = {
         onMessage: { addListener: (handler) => { onMessage = handler; } },
         onDisconnect: { addListener: (handler) => { onDisconnect = handler; } },
-        postMessage: (payload) => { port.payload = payload; },
+        postMessage: (payload) => {
+          port.payload = payload;
+          requests.push(payload);
+          if (payload.action === "status") queueMicrotask(() => port.reply(statusResult));
+          else ports.push(port);
+        },
         disconnect: () => onDisconnect(),
         reply: (result) => onMessage(result),
         fail: (message) => {
@@ -75,11 +81,13 @@ function extension() {
           delete runtime.lastError;
         }
       };
-      ports.push(port);
       return port;
     }
   };
-  vm.runInNewContext(read("background.js"), { chrome: { runtime, storage } });
+  function restartWorker() {
+    vm.runInNewContext(read("background.js"), { chrome: { runtime, storage } });
+  }
+  restartWorker();
   const note = {
     title: "Test note", url: "https://www.xiaohongshu.com/explore/current123",
     images: [{ url: "https://sns-img-bd.xhscdn.com/a" }, { url: "https://sns-img-bd.xhscdn.com/b" }]
@@ -114,7 +122,7 @@ function extension() {
       subscriptions.forEach((listener) => listeners.delete(listener));
     } };
   }
-  return { data, ports, openPopup, note };
+  return { data, ports, openPopup, note, requests, restartWorker };
 }
 
 test("toolbar opens the anchored popup with a fixed compact width", () => {
@@ -215,4 +223,31 @@ test("sparse selections retain note indices and oversized selections cannot save
   assert.equal(popup.controls.saveButtonLabel.textContent, "最多选择 30 张");
   popup.controls.imageGrid.children[0].click();
   assert.equal(popup.controls.saveButton.disabled, false);
+});
+
+
+test("an old connector is rejected before any save operation is sent", async () => {
+  const app = extension({ statusResult: { ok: false, error: "缺少图片列表" } });
+  const popup = app.openPopup();
+  await until(() => popup.controls.imageGrid.children.length === 2);
+  void popup.controls.saveButton.click();
+  await until(() => app.data.connectorJob?.result);
+  assert.deepEqual(app.requests.map((request) => request.action), ["status"]);
+  assert.match(popup.controls.resultMessage.textContent, /install.command/);
+  assert.equal(popup.controls.saveButton.disabled, false);
+});
+
+test("a restarted worker marks unfinished work interrupted without repeating it", async () => {
+  const app = extension();
+  let popup = app.openPopup();
+  await until(() => popup.controls.imageGrid.children.length === 2);
+  void popup.controls.saveButton.click();
+  await until(() => app.ports.length === 1);
+  popup.close();
+  app.restartWorker();
+  popup = app.openPopup();
+  await until(() => popup.controls.imageGrid.children.length === 2);
+  assert.equal(popup.controls.saveButton.disabled, false);
+  assert.match(popup.controls.resultMessage.textContent, /中断/);
+  assert.equal(app.requests.filter((request) => request.action === "save").length, 1);
 });

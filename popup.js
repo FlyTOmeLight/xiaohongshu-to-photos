@@ -382,6 +382,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 async function initialize() {
+  const state = await chrome.runtime.sendMessage({ type: "CONNECTOR_STATE" });
+  if (!state?.ok) throw new Error(state?.error || "无法读取后台任务状态");
   session = await chrome.storage.session.get(["popupDraft", "folderPath", "albums", "connectorJob"]);
   applySession();
   await collect();

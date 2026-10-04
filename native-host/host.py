@@ -17,6 +17,7 @@ import urllib.request
 from pathlib import Path
 
 MAX_MESSAGE_BYTES = 1024 * 1024
+PROTOCOL_VERSION = 2
 MAX_IMAGE_BYTES = 80 * 1024 * 1024
 LIVE_PHOTO_HELPER = Path(__file__).with_name("live-photo-helper")
 ALLOWED_HOST_SUFFIXES = (
@@ -415,6 +416,8 @@ def import_to_photos(paths: list[Path], album_id: str = "") -> tuple[bool, int, 
 
 def process(message: dict) -> dict:
     action = message.get("action", "save")
+    if action == "status":
+        return {"ok": True, "protocolVersion": PROTOCOL_VERSION}
     if action == "listAlbums":
         return list_albums()
     if action == "chooseFolder":
