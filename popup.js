@@ -38,6 +38,42 @@ let folderPath = "";
 let sourceTabId;
 let session = {};
 let saveHistory = [];
+let historyOpen = false;
+let resultDetails = "";
+let resultMode = false;
+let previewIndex = 0;
+let targetSnapshot;
+let dismissedResult;
+const ui = Object.fromEntries(["photosTargetButton", "folderTargetButton", "historyButton", "historyPane", "contentPane", "changeTargetButton", "targetSummary", "targetDialog", "closeTargetButton", "confirmTargetButton", "previewDialog", "previewImage", "previewLabel", "closePreviewButton", "previousImageButton", "nextImageButton", "previewSelectButton", "detailsDialog", "detailTitle", "detailText", "closeDetailsButton", "sourceLink", "detailsButton", "continueButton", "taskProgress", "clearDialog", "cancelClearButton", "confirmClearButton"].map(id => [id, document.querySelector(`#${id}`)]));
+function openDialog(dialog) { dialog.showModal(); }
+function targetSummary() {
+  ui.targetSummary.textContent = elements.destination.value === "folder"
+    ? `文件夹 · ${folderPath.split("/").filter(Boolean).pop() || "请选择位置"}`
+    : `照片 · ${elements.album.selectedOptions[0]?.textContent || "图库"}`;
+}
+function switchHistory() {
+  historyOpen = !historyOpen;
+  ui.historyPane.classList.toggle("hidden", !historyOpen);
+  ui.contentPane.classList.toggle("hidden", historyOpen);
+  elements.actionBar.classList.toggle("hidden", historyOpen || !note.images.length);
+  ui.historyButton.textContent = historyOpen ? "选图" : "记录";
+}
+function showDetails(title, text, url = "") {
+  ui.detailTitle.textContent = title;
+  ui.detailText.textContent = text;
+  const valid = /^https?:\/\/([\w-]+\.)*xiaohongshu\.com\//i.test(url);
+  ui.sourceLink.classList.toggle("hidden", !valid);
+  ui.sourceLink.href = valid ? url : "";
+  openDialog(ui.detailsDialog);
+}
+function renderPreview() {
+  const item = note.images[previewIndex];
+  ui.previewImage.src = item.previewUrl || item.url;
+  ui.previewImage.referrerPolicy = "no-referrer";
+  ui.previewLabel.textContent = `第 ${item.index || previewIndex + 1} 张 · ${previewIndex + 1}/${note.images.length}`;
+  ui.previewSelectButton.textContent = selected.has(previewIndex) ? "✓ 已选本张" : "选择本张";
+  ui.previewSelectButton.disabled = busy || resultMode;
+}
 
 function noteIdentity(url) {
   return String(url || "").match(/\/(?:explore|discovery\/item)\/([0-9a-z]+)/i)?.[1] || "";
@@ -45,19 +81,40 @@ function noteIdentity(url) {
 
 function renderHistory() {
   elements.history.replaceChildren();
-  if (!saveHistory.length) elements.history.textContent = "尚无保存记录";
+  if (!saveHistory.length) elements.history.textContent = "还没有保存记录，保存成功的笔记会出现在这里。";
+  let lastDay;
   for (const record of saveHistory) {
-    const row = document.createElement("p");
-    const link = document.createElement("a");
-    link.textContent = record.title || "小红书笔记";
-    if (/^https?:\/\/([\w-]+\.)*xiaohongshu\.com\//i.test(record.pageUrl || "")) {
-      link.href = record.pageUrl;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
+    const date = new Date(record.savedAt);
+    const day = date.toLocaleDateString();
+    if (day !== lastDay) {
+      const heading = document.createElement("p");
+      heading.className = "date-label";
+      const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+      heading.textContent = day === new Date().toLocaleDateString() ? "今天" : day === yesterday.toLocaleDateString() ? "昨天" : day;
+      elements.history.append(heading); lastDay = day;
     }
-    const detail = document.createElement("span");
-    detail.textContent = `${new Date(record.savedAt).toLocaleString()} · ${record.items.length} 张 · ${record.destination === "folder" ? record.folderPath : record.albumName || "照片图库"}`;
-    row.append(link, detail);
+    const row = document.createElement("button");
+    row.type = "button"; row.className = "history-row";
+    const thumb = document.createElement("span");
+    thumb.className = "history-thumb"; thumb.textContent = "▧";
+    if (/^https:\/\//i.test(record.previewUrl || "")) {
+      const image = document.createElement("img");
+      image.className = "history-thumb"; image.src = record.previewUrl;
+      image.alt = ""; image.loading = "lazy"; image.referrerPolicy = "no-referrer";
+      image.addEventListener("error", () => image.replaceWith(thumb));
+      row.append(image);
+    } else row.append(thumb);
+    const copy = document.createElement("span"); copy.className = "history-copy";
+    const title = document.createElement("b"); title.textContent = record.title || "小红书笔记";
+    const detail = document.createElement("small");
+    detail.textContent = `${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · ${record.items.length} 张`;
+    const target = document.createElement("em");
+    target.textContent = record.destination === "folder" ? `文件夹 · ${record.folderPath || "本地"}` : `照片 · ${record.albumName || "图库"}`;
+    copy.append(title, detail, target); row.append(copy);
+    row.addEventListener("click", () => showDetails(record.title || "保存记录", [
+      date.toLocaleString(), `保存位置：${target.textContent}`,
+      ...record.items.map(item => `第 ${item.index} 张 · ${item.kind === "live" ? "实况" : item.kind === "gif" ? "GIF" : "图片"} · ${item.format || ""}${item.quality === "page" ? " · 页面版本" : ""}`)
+    ].join("\n"), record.pageUrl));
     elements.history.append(row);
   }
   updateDuplicateHint();
@@ -90,7 +147,7 @@ function rememberDraft() {
     pageUrl: note.url,
     selected: [...selected],
     destination: elements.destination.value,
-    albumId: elements.album.value
+    albumId: elements.album.value, targetDraft: targetSnapshot ? { destination: elements.destination.value, albumId: elements.album.value } : null, targetSnapshot
   } });
 }
 
@@ -111,7 +168,10 @@ async function sendToConnector(payload) {
 }
 
 function updateDestinationUi() {
+  targetSummary();
   const local = elements.destination.value === "folder";
+  ui.photosTargetButton.setAttribute("aria-pressed", String(!local));
+  ui.folderTargetButton.setAttribute("aria-pressed", String(local));
   elements.albumSettings.classList.toggle("hidden", local);
   elements.folderSettings.classList.toggle("hidden", !local);
   elements.destinationHint.textContent = local
@@ -119,7 +179,11 @@ function updateDestinationUi() {
     : "原图、GIF、实况 · 可同步 iCloud";
 }
 
-function showSaveResult(payload, result, toast = false) {
+function showSaveResult(payload, result) {
+  if (payload.uiSavedItems?.length) {
+    const items = [...new Map([...payload.uiSavedItems, ...(result.items || [])].map(item => [item.index, item])).values()];
+    result = { ...result, items, saved: items.length, ok: result.ok || items.length > 0 };
+  }
   if (!result.ok) {
     elements.result.textContent = result.error || "保存失败，请稍后再试";
   } else {
@@ -134,8 +198,27 @@ function showSaveResult(payload, result, toast = false) {
       result.sourceWarning, result.historyWarning,
       local ? result.folderPath : ""].filter(Boolean).join("\n");
   }
+  resultDetails = elements.result.textContent;
+  elements.result.textContent = resultDetails.split("\n").slice(0, result.cancelled ? 2 : 1).join("\n");
+  elements.result.classList.toggle("warning", !result.ok || Boolean(result.failed || result.liveFallback || result.qualityFallbackDetails?.length || result.cancelled || result.sourceWarning || result.historyWarning));
   elements.result.classList.remove("hidden");
-  if (toast) showToast(elements.result.textContent, 6000);
+  resultMode = true;
+  ui.detailsButton.classList.remove("hidden");
+  ui.continueButton.classList.remove("hidden");
+  ui.changeTargetButton.classList.add("hidden");
+  elements.save.classList.add("hidden");
+  [...elements.grid.children].forEach((tile, index) => {
+    const original = note.images[index].index || index + 1;
+    const saved = result.items?.find(item => item.index === original);
+    const failed = result.failedIndices?.includes(original);
+    const staticFallback = saved && note.images[index].kind === "live" && saved.kind !== "live";
+    const marker = tile.children[tile.children.length - 1];
+    marker.textContent = failed ? "保存失败" : saved ? staticFallback ? "已保存 · 静态图" : saved.quality === "page" ? "已保存 · 页面版本" : "已保存" : "";
+    marker.classList.toggle("hidden", !marker.textContent);
+    marker.classList.toggle("warning", Boolean(failed || staticFallback || saved?.quality === "page"));
+    tile.classList.toggle("has-result", Boolean(marker.textContent));
+  });
+  updateSelectionUi();
 }
 
 function applySession() {
@@ -150,8 +233,19 @@ function applySession() {
     elements.album.value = [...elements.album.options].some((option) => option.value === previous) ? previous : "";
     elements.loadAlbums.textContent = "刷新相簿";
   }
+  targetSummary();
   const job = session.connectorJob;
   busy = Boolean(job?.busy);
+  ui.taskProgress.classList.toggle("hidden", !busy || job?.payload?.action !== "save");
+  ui.taskProgress.value = job?.progress?.total ? job.progress.completed / job.progress.total * 100 : 0;
+  ui.changeTargetButton.disabled = busy;
+  ui.confirmTargetButton.disabled = busy;
+  ui.closeTargetButton.disabled = busy;
+  if (busy && job.payload.action === "save") {
+    elements.save.classList.remove("hidden");
+    elements.result.classList.add("hidden");
+    ui.detailsButton.classList.add("hidden"); ui.continueButton.classList.add("hidden");
+  }
   elements.stop.classList.toggle("hidden", !busy || job?.payload?.action !== "save");
   elements.retryFailed.classList.toggle("hidden", busy || job?.payload?.pageUrl !== note.url
     || !job?.result?.failedIndices?.length);
@@ -164,8 +258,8 @@ function applySession() {
       const { phase, completed, total } = job.progress;
       elements.saveLabel.textContent = `${phase === "import" ? "正在导入" : "正在处理"} ${completed}/${total}`;
     }
-  } else if (job?.result && job.payload.pageUrl === note.url) {
-    if (job.payload.action === "save" || !job.result.ok) {
+  } else if (job?.result && job.result !== dismissedResult && job.payload.pageUrl === note.url) {
+    if (job.payload.action === "save") {
       showSaveResult(job.payload, job.result);
     }
   }
@@ -175,7 +269,7 @@ function setView(view) {
   elements.loading.classList.toggle("hidden", view !== "loading");
   elements.empty.classList.toggle("hidden", view !== "empty");
   elements.gallery.classList.toggle("hidden", view !== "gallery");
-  elements.actionBar.classList.toggle("hidden", view !== "gallery");
+  elements.actionBar.classList.toggle("hidden", view !== "gallery" || historyOpen);
 }
 
 function showToast(message, duration = 2400) {
@@ -199,13 +293,16 @@ function updateSelectionUi() {
   const local = elements.destination.value === "folder";
   elements.save.disabled = busy || count === 0 || count > 30 || (local && !folderPath);
   if (!busy) elements.saveLabel.textContent = count > 30 ? "最多选择 30 张" : count ? `${local ? "保存" : "导入"} ${count} 张` : "请选择图片";
-  [elements.refresh, elements.retry, elements.toggleAll, elements.destination,
+  [elements.refresh, elements.retry, elements.destination,
     elements.album, elements.loadAlbums, elements.chooseFolder].forEach((control) => {
     control.disabled = busy;
   });
+  elements.toggleAll.disabled = busy || resultMode;
   elements.actionBar.setAttribute("aria-busy", String(busy));
   [...elements.grid.children].forEach((button, index) => {
-    button.disabled = busy;
+    button.disabled = busy || resultMode;
+    button.children[0].disabled = busy || resultMode;
+    button.children[0].setAttribute("aria-pressed", String(selected.has(index)));
     button.setAttribute("aria-pressed", String(selected.has(index)));
   });
 }
@@ -216,10 +313,11 @@ function renderGallery() {
   elements.grid.replaceChildren();
 
   note.images.forEach((item, index) => {
-    const button = document.createElement("button");
-    button.type = "button";
+    const button = document.createElement("div");
+    const pick = document.createElement("button");
+    pick.type = "button"; pick.className = "pick";
     button.className = "image-item";
-    button.setAttribute("aria-label", `第 ${item.index || index + 1} 张图片`);
+    pick.setAttribute("aria-label", `选择第 ${item.index || index + 1} 张图片`);
     button.setAttribute("aria-pressed", "true");
 
     const image = document.createElement("img");
@@ -240,9 +338,14 @@ function renderGallery() {
     badge.textContent = item.kind === "live" ? "LIVE" : item.kind === "gif" ? "GIF" : "";
     badge.classList.toggle("hidden", !badge.textContent);
 
-    button.append(image, check, number, badge);
-    button.addEventListener("click", () => {
-      if (busy) return;
+    pick.append(image, check, number, badge);
+    const zoom = document.createElement("button"); zoom.type = "button"; zoom.className = "zoom";
+    zoom.textContent = "⤢"; zoom.setAttribute("aria-label", `放大第 ${item.index || index + 1} 张`);
+    zoom.addEventListener("click", () => { previewIndex = index; renderPreview(); openDialog(ui.previewDialog); });
+    const marker = document.createElement("span"); marker.className = "result-marker hidden";
+    button.append(pick, zoom, marker);
+    pick.addEventListener("click", () => {
+      if (busy || resultMode) return;
       selected.has(index) ? selected.delete(index) : selected.add(index);
       updateSelectionUi();
       void rememberDraft();
@@ -262,6 +365,7 @@ async function getSourceTab() {
 }
 
 async function collect() {
+  resultMode = false;
   elements.result.classList.add("hidden");
   setView("loading");
   elements.refresh.disabled = true;
@@ -310,7 +414,7 @@ async function collect() {
     const draft = session.popupDraft;
     if (draft?.pageUrl === note.url) {
       selected = new Set(draft.selected.filter((index) => index >= 0 && index < note.images.length));
-      elements.destination.value = draft.destination;
+      elements.destination.value = draft.targetSnapshot?.destination || draft.destination;
       if ([...elements.album.options].some((option) => option.value === draft.albumId)) {
         elements.album.value = draft.albumId;
       }
@@ -318,6 +422,12 @@ async function collect() {
     updateDestinationUi();
     renderGallery();
     applySession();
+    if (draft?.pageUrl === note.url && draft.targetDraft) {
+      targetSnapshot = draft.targetSnapshot;
+      elements.destination.value = draft.targetDraft.destination;
+      elements.album.value = draft.targetDraft.albumId;
+      updateDestinationUi(); openDialog(ui.targetDialog);
+    }
   } catch (error) {
     setEmpty("读取失败", error?.message || "请刷新小红书页面后重试。");
   } finally {
@@ -326,8 +436,48 @@ async function collect() {
 }
 
 elements.refresh.addEventListener("click", collect);
-elements.clearHistory.addEventListener("click", async () => {
-  await chrome.storage.local.set({ saveHistory: [] });
+elements.clearHistory.addEventListener("click", () => openDialog(ui.clearDialog));
+ui.confirmClearButton.addEventListener("click", async () => { await chrome.storage.local.set({ saveHistory: [] }); ui.clearDialog.close(); });
+ui.cancelClearButton.addEventListener("click", () => ui.clearDialog.close());
+ui.historyButton.addEventListener("click", switchHistory);
+ui.changeTargetButton.addEventListener("click", () => {
+  targetSnapshot = { destination: elements.destination.value, albumId: elements.album.value, folderPath };
+  openDialog(ui.targetDialog);
+});
+function cancelTarget() {
+  if (targetSnapshot) {
+    elements.destination.value = targetSnapshot.destination; elements.album.value = targetSnapshot.albumId;
+    folderPath = targetSnapshot.folderPath || "";
+    session.folderPath = folderPath;
+    elements.folderPath.textContent = folderPath || "尚未选择文件夹";
+    void chrome.storage.session.set({ folderPath });
+    void chrome.storage.local.set({ folderPath });
+  }
+  targetSnapshot = undefined;
+  updateDestinationUi(); updateSelectionUi(); void rememberDraft();
+}
+ui.closeTargetButton.addEventListener("click", () => { cancelTarget(); ui.targetDialog.close(); });
+ui.targetDialog.addEventListener("cancel", (event) => { if (busy) event.preventDefault(); else cancelTarget(); });
+ui.confirmTargetButton.addEventListener("click", async () => {
+  if (elements.destination.value === "folder" && !folderPath) { showToast("请先选择文件夹"); return; }
+  targetSnapshot = undefined; await rememberDraft(); await rememberDestination();
+  targetSummary(); ui.targetDialog.close(); updateSelectionUi();
+});
+ui.closePreviewButton.addEventListener("click", () => ui.previewDialog.close());
+ui.previousImageButton.addEventListener("click", () => { previewIndex = (previewIndex + note.images.length - 1) % note.images.length; renderPreview(); });
+ui.nextImageButton.addEventListener("click", () => { previewIndex = (previewIndex + 1) % note.images.length; renderPreview(); });
+ui.previewSelectButton.addEventListener("click", () => {
+  if (busy || resultMode) return;
+  selected.has(previewIndex) ? selected.delete(previewIndex) : selected.add(previewIndex);
+  updateSelectionUi(); renderPreview(); void rememberDraft();
+});
+ui.detailsButton.addEventListener("click", () => showDetails("保存详情", resultDetails));
+ui.closeDetailsButton.addEventListener("click", () => ui.detailsDialog.close());
+ui.continueButton.addEventListener("click", () => {
+  resultMode = false; dismissedResult = session.connectorJob?.result;
+  [elements.result, elements.retryFailed, ui.detailsButton, ui.continueButton].forEach(control => control.classList.add("hidden"));
+  ui.changeTargetButton.classList.remove("hidden"); elements.save.classList.remove("hidden");
+  renderGallery();
 });
 elements.stop.addEventListener("click", async () => {
   if (!busy) return;
@@ -338,14 +488,14 @@ elements.retryFailed.addEventListener("click", async () => {
   const job = session.connectorJob;
   if (busy || job?.payload?.pageUrl !== note.url || !job?.result?.failedIndices?.length) return;
   const failed = new Set(job.result.failedIndices);
-  const payload = { ...job.payload, images: job.payload.images.filter((item) => failed.has(item.index)) };
+  const payload = { ...job.payload, uiSavedItems: [...(job.payload.uiSavedItems || []), ...(job.result.items || [])], images: job.payload.images.filter((item) => failed.has(item.index)) };
   if (!payload.images.length) return;
   busy = true;
   elements.retryFailed.classList.add("hidden");
   updateSelectionUi();
   try {
     const result = await chrome.runtime.sendMessage({ type: "CONNECTOR_REQUEST", payload });
-    showSaveResult(payload, result, true);
+    showSaveResult(payload, result);
   } catch (error) {
     showSaveResult(payload, { ok: false, error: error.message });
   } finally {
@@ -363,14 +513,17 @@ elements.toggleAll.addEventListener("click", () => {
   void rememberDraft();
 });
 
-elements.destination.addEventListener("change", () => {
+function changeDestination() {
   updateDestinationUi();
   elements.result.classList.add("hidden");
   updateSelectionUi();
   void rememberDraft();
-  void rememberDestination();
-});
-elements.album.addEventListener("change", () => { void rememberDraft(); void rememberDestination(); });
+  if (!targetSnapshot) void rememberDestination();
+}
+elements.destination.addEventListener("change", changeDestination);
+ui.photosTargetButton.addEventListener("click", () => { elements.destination.value = "photos"; changeDestination(); });
+ui.folderTargetButton.addEventListener("click", () => { elements.destination.value = "folder"; changeDestination(); });
+elements.album.addEventListener("change", () => { void rememberDraft(); if (!targetSnapshot) void rememberDestination(); });
 
 elements.loadAlbums.addEventListener("click", async () => {
   if (busy) return;
@@ -385,7 +538,7 @@ elements.loadAlbums.addEventListener("click", async () => {
     elements.album.replaceChildren(new Option("图库（不指定相簿）", ""));
     result.albums.forEach((album) => elements.album.add(new Option(album.name, album.id)));
     elements.album.value = [...elements.album.options].some((option) => option.value === previous) ? previous : "";
-    await rememberDestination();
+    if (!targetSnapshot) await rememberDestination();
     if (!result.albums.length) showToast("还没有可选相簿，请先在“照片”中创建相簿");
   } catch (error) {
     showToast(error.message, 6000);
@@ -426,6 +579,7 @@ elements.save.addEventListener("click", async () => {
   const local = elements.destination.value === "folder";
   if (local && !folderPath) return;
 
+  resultMode = false;
   busy = true;
   elements.result.classList.add("hidden");
   updateSelectionUi();
@@ -441,6 +595,7 @@ elements.save.addEventListener("click", async () => {
       images: note.images.flatMap((item, index) => selected.has(index) ? [{
         index: item.index || index + 1,
         url: item.url,
+        previewUrl: item.previewUrl || item.url,
         kind: item.kind,
         videoUrl: item.videoUrl || "",
         videoUrls: Array.isArray(item.videoUrls) ? item.videoUrls : []
@@ -450,7 +605,7 @@ elements.save.addEventListener("click", async () => {
       throw new Error(result?.error || "保存失败");
     }
     showSaveResult({ destination: elements.destination.value, albumId: elements.album.value,
-      albumName: elements.album.selectedOptions[0]?.textContent || "" }, result, true);
+      albumName: elements.album.selectedOptions[0]?.textContent || "" }, result);
   } catch (error) {
     elements.result.textContent = error?.message || "保存失败，请稍后再试";
     elements.result.classList.remove("hidden");

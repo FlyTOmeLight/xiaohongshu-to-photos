@@ -14,19 +14,13 @@
         </div>
         <div>
           <h1>红薯收藏夹</h1>
-          <p>把喜欢的瞬间带回 Mac</p>
         </div>
         <button id="refreshButton" class="icon-button" type="button" aria-label="重新读取">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M18.2 9A7 7 0 0 0 6.7 6.7L4 9m16 6-2.7 2.3A7 7 0 0 1 5.8 15"/></svg>
         </button>
-      </header>
-      <details class="history-panel">
-        <summary>保存历史</summary>
-        <p>最近 100 次成功保存，仅保留在此设备。</p>
-        <button id="clearHistoryButton" class="target-button" type="button">清除记录</button>
-        <div id="historyList" class="history-list"></div>
-      </details>
-
+      <button id="historyButton" class="quiet-button" type="button">记录</button></header>
+      <section id="historyPane" class="history-pane hidden"><div class="pane-heading"><h2>保存记录</h2><button id="clearHistoryButton" class="quiet-button">清除</button></div><p class="muted">最近 100 次成功保存，仅保存在此设备</p><div id="historyList" class="history-list"></div></section>
+      <div class="content" id="contentPane">
       <section id="loadingState" class="state-card loading-state" aria-live="polite">
         <div class="loader"><i></i><i></i><i></i></div>
         <h2>正在寻找图片</h2>
@@ -52,10 +46,24 @@
         <div id="imageGrid" class="image-grid"></div>
       </section>
 
+      </div>
       <footer id="actionBar" class="action-bar hidden">
+        <button id="changeTargetButton" class="target-summary"><span id="targetSummary">照片 · 图库</span><span>更改 ›</span></button>
+        <p id="resultMessage" class="result-message hidden" role="status" aria-live="polite"></p>
+        <button id="detailsButton" class="quiet-button hidden">查看详情</button><button id="continueButton" class="quiet-button hidden">继续选图</button>
+        <progress id="taskProgress" class="hidden" max="100" value="0"></progress>
+        <button id="retryFailedButton" class="target-button hidden" type="button">重试失败项</button>
+        <button id="stopButton" class="target-button hidden" type="button">停止任务</button>
+        <button id="saveButton" class="save-button" type="button">
+          <span id="saveButtonLabel">导入照片</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 19h14"/></svg>
+        </button>
+      </footer>
+
+      <dialog id="targetDialog" class="target-dialog" aria-label="保存位置"><div class="pane-heading"><h2>保存到哪里</h2><button id="closeTargetButton" class="quiet-button" aria-label="关闭保存位置">✕</button></div>
         <div class="destination-settings">
-          <label for="destinationSelect">保存到</label>
-          <select id="destinationSelect">
+          <div class="destination-tabs"><button id="photosTargetButton" type="button">macOS 照片</button><button id="folderTargetButton" type="button">本地文件夹</button></div><label class="hidden" for="destinationSelect">保存到</label>
+          <select id="destinationSelect" class="hidden">
             <option value="photos">macOS“照片”</option>
             <option value="folder">本地文件夹</option>
           </select>
@@ -70,15 +78,10 @@
           </div>
           <p id="destinationHint" class="destination-hint">原图、GIF、实况 · 可同步 iCloud</p>
         </div>
-        <p id="resultMessage" class="result-message hidden" role="status" aria-live="polite"></p>
-        <button id="retryFailedButton" class="target-button hidden" type="button">重试失败项</button>
-        <button id="stopButton" class="target-button hidden" type="button">停止任务</button>
-        <button id="saveButton" class="save-button" type="button">
-          <span id="saveButtonLabel">导入照片</span>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 19h14"/></svg>
-        </button>
-      </footer>
-
+<button id="confirmTargetButton" class="save-button">使用这个位置</button></dialog>
+      <dialog id="previewDialog" class="preview-dialog" aria-label="图片静态预览"><div class="pane-heading"><button id="closePreviewButton" class="quiet-button">返回</button><span id="previewLabel"></span></div><img id="previewImage" alt="图片静态预览"><div class="preview-actions"><button id="previousImageButton">上一张</button><button id="previewSelectButton">选择本张</button><button id="nextImageButton">下一张</button></div><p class="muted">查看静态预览</p></dialog>
+      <dialog id="detailsDialog" aria-labelledby="detailTitle"><div class="pane-heading"><h2 id="detailTitle">保存详情</h2><button id="closeDetailsButton" class="quiet-button">关闭</button></div><p id="detailText"></p><a id="sourceLink" class="hidden" target="_blank" rel="noopener noreferrer">打开原笔记 ↗</a></dialog>
+      <dialog id="clearDialog" aria-label="清除保存记录确认"><h2>清除保存记录？</h2><p class="muted">只清除此设备上的记录，已保存的照片和文件会保留。</p><div class="preview-actions"><button id="cancelClearButton">取消</button><button id="confirmClearButton">清除记录</button></div></dialog>
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
     </main>
     <script src="popup.js"></script>

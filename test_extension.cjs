@@ -37,7 +37,9 @@ class Control {
   addEventListener(event, handler) { this.handlers[event] = handler; }
   get options() { return this.children; }
   get selectedOptions() { return this.children.filter((option) => option.value === this.value); }
-  click() { return this.disabled ? undefined : this.handlers.click(); }
+  showModal() { this.open = true; }
+  close() { this.open = false; }
+  click() { return this.disabled ? undefined : this.handlers.click ? this.handlers.click() : this.children[0]?.click(); }
 }
 
 function extension({ statusResult = { ok: true, protocolVersion: 3 } } = {}) {
@@ -370,8 +372,72 @@ test('successful history is bounded, detects repeated indices, and can be cleare
   assert.equal(app.localData.saveHistory[0].pageUrl, app.note.url);
   assert.deepEqual(Array.from(app.localData.saveHistory[0].items, (item) => item.index), [1]);
   assert.match(popup.controls.duplicateHint.textContent, /1 张曾保存/);
-  assert.equal(popup.controls.historyList.children.length, 100);
+  assert.equal(popup.controls.historyList.children.filter(row => row.className === "history-row").length, 100);
+  assert.equal(app.localData.saveHistory.length, 100);
   await popup.controls.clearHistoryButton.click();
+  await popup.controls.confirmClearButton.click();
   assert.equal(app.localData.saveHistory.length, 0);
   assert.equal(popup.controls.duplicateHint.classList.contains('hidden'), true);
+});
+
+
+test("target edits require confirmation, cancel restores preferences, and zoom preserves selection", async () => {
+  const app = extension(); const popup = app.openPopup(); const c = popup.controls;
+  await until(() => c.imageGrid.children.length === 2);
+  c.changeTargetButton.click();
+  assert.equal(c.targetDialog.open, true);
+  c.destinationSelect.value = "folder"; c.destinationSelect.handlers.change();
+  await tick();
+  assert.equal(app.localData.destinationPreferences, undefined);
+  c.closeTargetButton.click();
+  assert.equal(c.destinationSelect.value, "photos");
+  c.imageGrid.children[0].children[1].click();
+  assert.equal(c.previewDialog.open, true);
+  assert.equal(c.imageCount.textContent, "已选 2 / 2 张");
+  c.previewSelectButton.click();
+  assert.equal(c.imageCount.textContent, "已选 1 / 2 张");
+  c.historyButton.click(); c.historyButton.click();
+  assert.equal(c.imageCount.textContent, "已选 1 / 2 张");
+  c.clearHistoryButton.click();
+  assert.equal(c.clearDialog.open, true);
+  c.cancelClearButton.click();
+  assert.equal(c.clearDialog.open, false);
+});
+
+test("retry results retain successful image markers and history stores only newly saved images", async () => {
+  const app = extension(); app.note.images[0].previewUrl = "https://sns-img-bd.xhscdn.com/preview";
+  const popup = app.openPopup(); const c = popup.controls;
+  await until(() => c.imageGrid.children.length === 2);
+  void c.saveButton.click(); await until(() => app.ports.length === 1);
+  app.ports[0].reply({ ok: true, saved: 1, failed: 1, failedIndices: [2], items: [{ index: 1, kind: "image", format: "jpg" }] });
+  await until(() => !app.data.connectorJob.busy);
+  assert.equal(app.localData.saveHistory[0].previewUrl, app.note.images[0].previewUrl);
+  assert.equal(c.imageGrid.children[0].children[2].textContent, "已保存");
+  assert.equal(c.imageGrid.children[1].children[2].textContent, "保存失败");
+  void c.retryFailedButton.click(); await until(() => app.ports.length === 2);
+  app.ports[1].reply({ ok: true, saved: 1, failed: 0, failedIndices: [], items: [{ index: 2, kind: "image", format: "jpg", quality: "page" }] });
+  await until(() => !app.data.connectorJob.busy);
+  assert.equal(c.imageGrid.children[0].children[2].textContent, "已保存");
+  assert.equal(c.imageGrid.children[1].children[2].textContent, "已保存 · 页面版本");
+  assert.match(c.resultMessage.textContent, /已导入 2 张/);
+  assert.equal(app.localData.saveHistory[0].items.length, 1);
+});
+
+test("folder sheet resumes after popup closure and applies only after confirmation", async () => {
+  const app = extension(); let popup = app.openPopup();
+  await until(() => popup.controls.imageGrid.children.length === 2);
+  popup.controls.changeTargetButton.click();
+  popup.controls.folderTargetButton.click();
+  void popup.controls.chooseFolderButton.click();
+  await until(() => app.ports.length === 1);
+  popup.close(); app.ports[0].reply({ ok: true, path: "/tmp/new-folder" });
+  await until(() => !app.data.connectorJob.busy);
+  popup = app.openPopup();
+  await until(() => popup.controls.targetDialog.open);
+  assert.equal(popup.controls.destinationSelect.value, "folder");
+  assert.equal(popup.controls.folderPath.textContent, "/tmp/new-folder");
+  assert.equal(app.localData.destinationPreferences, undefined);
+  await popup.controls.confirmTargetButton.click();
+  assert.equal(app.localData.destinationPreferences.destination, "folder");
+  assert.equal(popup.controls.targetDialog.open, false);
 });

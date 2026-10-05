@@ -4,7 +4,9 @@
 
 [中文](#中文) · [English](#english)
 
-![演示：在小红书笔记页打开扩展，勾选图片，一键导入](docs/demo.gif)
+![v1.5 界面：选图、保存位置和保存记录](docs/ui-overview.png)
+
+[查看已确认的可点击设计稿](https://github.com/FlyTOmeLight/xiaohongshu-to-photos/tree/design/popup-interaction-v1.5/design-previews/interaction-prototype)（下载该目录，打开 `prototype.html`；原型使用演示数据，不执行保存）。上图由正式界面配合演示数据生成，示例照片来源见设计稿目录的 `sources.md`。
 
 预览、勾选、选择保存位置。默认导入「照片」，可选择目标相簿，也可导出到本地文件夹。导入「照片」后，可经 iCloud 照片同步到其他 Apple 设备。
 
@@ -68,9 +70,11 @@ Chrome 扩展不能直接写入 macOS 照片图库，所以走 Chrome 官方的 
 2. 点击工具栏上的「红薯收藏夹」。
 3. 勾选需要的图片（默认全选），点「导入 N 张」。
 
-默认保存到「照片」图库。点「读取相簿」后，可选择已有的目标相簿；未指定相簿时，仍直接导入图库。
+默认保存到「照片」图库。点底部的「更改」，在保存位置面板中读取相簿并选择目标，点「使用这个位置」确认。关闭面板会放弃未确认的修改。未指定相簿时，直接导入图库。
 
-要保存为文件，将「保存到」切换为「本地文件夹」，点「选择文件夹」，再点「保存 N 张」。每次导出会在所选位置创建以笔记标题开头的独立子文件夹，不覆盖以前保存的文件。普通图片和 GIF 保留文件格式；实况照片保存为同名的图片与 `.mov` 配对文件，例如 `02.jpg` 和 `02.mov`。文件夹本身不会像「照片」一样播放实况。
+每张图右下角可以放大查看静态预览，放大不会改变勾选。保存结果标在对应图片上；「查看详情」显示失败原因和回退提示，「重试失败项」只处理失败图片，「继续选图」回到选择状态。顶部「记录」打开独立的保存记录页，返回时保留勾选。记录按日期分组，点击可查看保存位置、媒体编号及原笔记链接；清除前需要确认。旧记录或失效缩略图显示媒体占位图。
+
+要保存为文件，将「保存到」切换为「本地文件夹」，点「选择文件夹」，点「使用这个位置」确认，再点「保存 N 张」。每次导出会在所选位置创建以笔记标题开头的独立子文件夹，不覆盖以前保存的文件。普通图片和 GIF 保留文件格式；实况照片保存为同名的图片与 `.mov` 配对文件，例如 `02.jpg` 和 `02.mov`。文件夹本身不会像「照片」一样播放实况。
 
 扩展在工具栏按钮下方显示小弹窗。系统文件夹选择器可能使弹窗关闭；选好后再次点击扩展即可继续，勾选状态和保存位置会保留。保存任务在后台执行，关闭弹窗后仍能完成，再次打开可查看结果。取消文件夹选择不会开始下载。
 
@@ -91,7 +95,7 @@ Chrome 扩展不能直接写入 macOS 照片图库，所以走 Chrome 官方的 
 | `activeTab` | 点击扩展时读取当前标签页 |
 | `scripting` | 在页面主世界注入读取脚本 |
 | `nativeMessaging` | 把选中的图片 URL 交给本机连接器 |
-| `storage` | 在当前浏览器会话中保留勾选状态、保存位置和任务结果 |
+| `storage` | 在会话中保留勾选和任务状态；在本设备持久保存常用位置及最近 100 次成功记录 |
 | `host_permissions` | 仅限 `*.xiaohongshu.com`、`*.xhscdn.com`、`*.xhscdn.net` |
 
 连接器侧另有一层独立的域名白名单校验，扩展被篡改也无法让它去下载别处的文件。
@@ -204,7 +208,9 @@ When you first load albums or import, macOS asks whether Chrome may control Phot
 2. Click **红薯收藏夹** in the toolbar.
 3. Tick the images you want (all are selected by default) and click **Import N**.
 
-Photos is the default destination. Click **读取相簿** (Load albums) to select an existing album, or leave the album unspecified to import directly into the library.
+Photos is the default destination. Click **更改** (Change) in the bottom bar, load and select an album, then confirm with **使用这个位置** (Use this location). Closing the panel discards unconfirmed edits. Leave the album unspecified to import into the library.
+
+Use each image's zoom button for a static preview without changing selection. Results appear on individual images; open details for errors and fallback notices, retry only failed images, or continue selecting. **记录** (Records) opens a separate history view grouped by date. Each entry shows its destination and saved media numbers, with a link to the source note. Clearing records requires confirmation and keeps saved files intact. Missing or expired thumbnails use a media placeholder.
 
 For local files, choose **本地文件夹** (Local folder), click **选择文件夹** (Choose folder), then **保存 N 张** (Save N). Each export creates a separate subfolder named after the post, so previous exports are never overwritten. Ordinary images and GIFs retain their format. Live Photos are saved as matching image/MOV pairs, such as `02.jpg` and `02.mov`; a folder does not play them as Live Photos.
 
@@ -227,7 +233,7 @@ Up to 30 images per import, 80 MB per image.
 | `activeTab` | Read the current tab when you click the extension |
 | `scripting` | Inject the read script into the page's main world |
 | `nativeMessaging` | Hand the selected image URLs to the local connector |
-| `storage` | Retain image selection, destination, task state and results for the current browser session |
+| `storage` | Retain selections and tasks for the session; store destination preferences and the latest 100 successful records locally |
 | `host_permissions` | Limited to `*.xiaohongshu.com`, `*.xhscdn.com`, `*.xhscdn.net` |
 
 The host enforces its own independent hostname allowlist, so even a tampered extension cannot make it fetch files from anywhere else.
