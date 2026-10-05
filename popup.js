@@ -44,7 +44,7 @@ let resultMode = false;
 let previewIndex = 0;
 let targetSnapshot;
 let dismissedResult;
-const ui = Object.fromEntries(["photosTargetButton", "folderTargetButton", "historyButton", "historyPane", "contentPane", "changeTargetButton", "targetSummary", "targetDialog", "closeTargetButton", "confirmTargetButton", "previewDialog", "previewImage", "previewLabel", "closePreviewButton", "previousImageButton", "nextImageButton", "previewSelectButton", "detailsDialog", "detailTitle", "detailText", "closeDetailsButton", "sourceLink", "detailsButton", "continueButton", "taskProgress", "clearDialog", "cancelClearButton", "confirmClearButton"].map(id => [id, document.querySelector(`#${id}`)]));
+const ui = Object.fromEntries(["photosTargetButton", "folderTargetButton", "historyButton", "historyPane", "contentPane", "changeTargetButton", "targetSummary", "targetDialog", "closeTargetButton", "confirmTargetButton", "previewDialog", "previewImage", "previewLabel", "closePreviewButton", "previousImageButton", "nextImageButton", "previewSelectButton", "detailsDialog", "detailTitle", "detailText", "closeDetailsButton", "sourceLink", "detailsButton", "taskProgress", "clearDialog", "cancelClearButton", "confirmClearButton"].map(id => [id, document.querySelector(`#${id}`)]));
 function openDialog(dialog) { dialog.showModal(); }
 function targetSummary() {
   ui.targetSummary.textContent = elements.destination.value === "folder"
@@ -79,6 +79,29 @@ function noteIdentity(url) {
   return String(url || "").match(/\/(?:explore|discovery\/item)\/([0-9a-z]+)/i)?.[1] || "";
 }
 
+function historyPreviewUrl(record) {
+  const first = record.items[0];
+  const matchingNote = noteIdentity(record.pageUrl) && noteIdentity(record.pageUrl) === noteIdentity(note.url);
+  const sourceImage = matchingNote ? note.images.find((item, index) => (item.index || index + 1) === first?.index) : null;
+  const job = session.connectorJob;
+  const savedImage = noteIdentity(record.pageUrl) && noteIdentity(record.pageUrl) === noteIdentity(job?.payload?.pageUrl)
+    ? job.payload.images?.find(item => item.index === first?.index) : null;
+  return record.previewUrl || first?.previewUrl || first?.url
+    || sourceImage?.previewUrl || sourceImage?.url || savedImage?.previewUrl || savedImage?.url;
+}
+
+async function restoreHistoryPreviews() {
+  let changed = false;
+  saveHistory = saveHistory.map(record => {
+    if (record.previewUrl) return record;
+    const previewUrl = historyPreviewUrl(record);
+    if (!/^https?:\/\//i.test(previewUrl || "")) return record;
+    changed = true;
+    return { ...record, previewUrl };
+  });
+  if (changed) await chrome.storage.local.set({ saveHistory });
+}
+
 function renderHistory() {
   elements.history.replaceChildren();
   if (!saveHistory.length) elements.history.textContent = "还没有保存记录，保存成功的笔记会出现在这里。";
@@ -97,9 +120,10 @@ function renderHistory() {
     row.type = "button"; row.className = "history-row";
     const thumb = document.createElement("span");
     thumb.className = "history-thumb"; thumb.textContent = "▧";
-    if (/^https:\/\//i.test(record.previewUrl || "")) {
+    const previewUrl = historyPreviewUrl(record);
+    if (/^https?:\/\//i.test(previewUrl || "")) {
       const image = document.createElement("img");
-      image.className = "history-thumb"; image.src = record.previewUrl;
+      image.className = "history-thumb"; image.src = previewUrl;
       image.alt = ""; image.loading = "lazy"; image.referrerPolicy = "no-referrer";
       image.addEventListener("error", () => image.replaceWith(thumb));
       row.append(image);
@@ -204,9 +228,8 @@ function showSaveResult(payload, result) {
   elements.result.classList.remove("hidden");
   resultMode = true;
   ui.detailsButton.classList.remove("hidden");
-  ui.continueButton.classList.remove("hidden");
   ui.changeTargetButton.classList.add("hidden");
-  elements.save.classList.add("hidden");
+  elements.save.classList.remove("hidden");
   [...elements.grid.children].forEach((tile, index) => {
     const original = note.images[index].index || index + 1;
     const saved = result.items?.find(item => item.index === original);
@@ -244,7 +267,7 @@ function applySession() {
   if (busy && job.payload.action === "save") {
     elements.save.classList.remove("hidden");
     elements.result.classList.add("hidden");
-    ui.detailsButton.classList.add("hidden"); ui.continueButton.classList.add("hidden");
+    ui.detailsButton.classList.add("hidden");
   }
   elements.stop.classList.toggle("hidden", !busy || job?.payload?.action !== "save");
   elements.retryFailed.classList.toggle("hidden", busy || job?.payload?.pageUrl !== note.url
@@ -291,8 +314,8 @@ function updateSelectionUi() {
   elements.count.textContent = `已选 ${count} / ${note.images.length} 张`;
   elements.toggleAll.textContent = count === note.images.length ? "取消全选" : "全部选择";
   const local = elements.destination.value === "folder";
-  elements.save.disabled = busy || count === 0 || count > 30 || (local && !folderPath);
-  if (!busy) elements.saveLabel.textContent = count > 30 ? "最多选择 30 张" : count ? `${local ? "保存" : "导入"} ${count} 张` : "请选择图片";
+  elements.save.disabled = busy || (!resultMode && (count === 0 || count > 30 || (local && !folderPath)));
+  if (!busy) elements.saveLabel.textContent = resultMode ? "继续选图" : count > 30 ? "最多选择 30 张" : count ? `${local ? "保存" : "导入"} ${count} 张` : "请选择图片";
   [elements.refresh, elements.retry, elements.destination,
     elements.album, elements.loadAlbums, elements.chooseFolder].forEach((control) => {
     control.disabled = busy;
@@ -421,6 +444,8 @@ async function collect() {
     }
     updateDestinationUi();
     renderGallery();
+    await restoreHistoryPreviews().catch(error => showToast(`首图已恢复，但记录更新失败：${error.message}`, 6000));
+    renderHistory();
     applySession();
     if (draft?.pageUrl === note.url && draft.targetDraft) {
       targetSnapshot = draft.targetSnapshot;
@@ -473,12 +498,12 @@ ui.previewSelectButton.addEventListener("click", () => {
 });
 ui.detailsButton.addEventListener("click", () => showDetails("保存详情", resultDetails));
 ui.closeDetailsButton.addEventListener("click", () => ui.detailsDialog.close());
-ui.continueButton.addEventListener("click", () => {
+function continueSelection() {
   resultMode = false; dismissedResult = session.connectorJob?.result;
-  [elements.result, elements.retryFailed, ui.detailsButton, ui.continueButton].forEach(control => control.classList.add("hidden"));
+  [elements.result, elements.retryFailed, ui.detailsButton].forEach(control => control.classList.add("hidden"));
   ui.changeTargetButton.classList.remove("hidden"); elements.save.classList.remove("hidden");
   renderGallery();
-});
+}
 elements.stop.addEventListener("click", async () => {
   if (!busy) return;
   await chrome.runtime.sendMessage({ type: "CONNECTOR_CANCEL" });
@@ -574,6 +599,7 @@ elements.chooseFolder.addEventListener("click", async () => {
 
 elements.save.addEventListener("click", async () => {
   if (busy) return;
+  if (resultMode) { continueSelection(); return; }
   const images = note.images.filter((_, index) => selected.has(index));
   if (!images.length || images.length > 30) return;
   const local = elements.destination.value === "folder";

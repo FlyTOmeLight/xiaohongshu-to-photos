@@ -72,7 +72,7 @@ Chrome 扩展不能直接写入 macOS 照片图库，所以走 Chrome 官方的 
 
 默认保存到「照片」图库。点底部的「更改」，在保存位置面板中读取相簿并选择目标，点「使用这个位置」确认。关闭面板会放弃未确认的修改。未指定相簿时，直接导入图库。
 
-每张图右下角可以放大查看静态预览，放大不会改变勾选。保存结果标在对应图片上；「查看详情」显示失败原因和回退提示，「重试失败项」只处理失败图片，「继续选图」回到选择状态。顶部「记录」打开独立的保存记录页，返回时保留勾选。记录按日期分组，点击可查看保存位置、媒体编号及原笔记链接；清除前需要确认。旧记录或失效缩略图显示媒体占位图。
+每张图右下角可以放大查看静态预览，放大不会改变勾选。保存结果标在对应图片上；「查看详情」显示失败原因和回退提示，「重试失败项」只处理失败图片，「继续选图」回到选择状态。顶部「记录」打开独立的保存记录页，返回时保留勾选。记录按日期分组，点击可查看保存位置、媒体编号及原笔记链接；清除前需要确认。历史首图支持 HTTP 和 HTTPS 地址。旧记录若未保存图片地址，重新打开原笔记并读取后会补回首图；无法恢复或加载失败时显示占位图。弹窗高度会随可用空间收缩，只滚动内容区，底部操作保持可见。
 
 要保存为文件，将「保存到」切换为「本地文件夹」，点「选择文件夹」，点「使用这个位置」确认，再点「保存 N 张」。每次导出会在所选位置创建以笔记标题开头的独立子文件夹，不覆盖以前保存的文件。普通图片和 GIF 保留文件格式；实况照片保存为同名的图片与 `.mov` 配对文件，例如 `02.jpg` 和 `02.mov`。文件夹本身不会像「照片」一样播放实况。
 
@@ -127,7 +127,7 @@ Chrome 扩展不能直接写入 macOS 照片图库，所以走 Chrome 官方的 
 
 ## 开发验证
 
-在项目根目录运行 `./scripts/check.command`。需要 Node.js 22+、Python 3.10+ 和 Apple 命令行开发工具。该命令运行回归测试、检查脚本语法并编译 AppleScript，还会在临时目录执行真实连接器安装与协议检查。Swift 编译使用所选工具链的 macOS SDK。临时产物会自动清理，测试不会写入真实照片图库。
+在项目根目录运行 `./scripts/check.command`。需要 Node.js 22+、Python 3.10+、Google Chrome 和 Apple 命令行开发工具。该命令运行回归测试，并在真实 Chrome 中覆盖 360、480、600px 高度的 18 个布局场景，检查脚本语法并编译 AppleScript，还会在临时目录执行真实连接器安装与协议检查。Swift 编译使用所选工具链的 macOS SDK。临时产物会自动清理，测试不会写入真实照片图库。
 
 GitHub Actions 在每次向 `main` 推送和创建 PR 时，在 macOS 上运行相同检查，并验证最低支持的 Python 3.10。
 
@@ -210,7 +210,7 @@ When you first load albums or import, macOS asks whether Chrome may control Phot
 
 Photos is the default destination. Click **更改** (Change) in the bottom bar, load and select an album, then confirm with **使用这个位置** (Use this location). Closing the panel discards unconfirmed edits. Leave the album unspecified to import into the library.
 
-Use each image's zoom button for a static preview without changing selection. Results appear on individual images; open details for errors and fallback notices, retry only failed images, or continue selecting. **记录** (Records) opens a separate history view grouped by date. Each entry shows its destination and saved media numbers, with a link to the source note. Clearing records requires confirmation and keeps saved files intact. Missing or expired thumbnails use a media placeholder.
+Use each image's zoom button for a static preview without changing selection. Results appear on individual images; open details for errors and fallback notices, retry only failed images, or continue selecting. **记录** (Records) opens a separate history view grouped by date. Each entry shows its destination and saved media numbers, with a link to the source note. Clearing records requires confirmation and keeps saved files intact. History previews support HTTP and HTTPS. Reopening and reading the original note restores missing preview metadata in older records. Unavailable images use a media placeholder. The popup fits the available viewport; only its content scrolls, keeping the bottom actions visible.
 
 For local files, choose **本地文件夹** (Local folder), click **选择文件夹** (Choose folder), then **保存 N 张** (Save N). Each export creates a separate subfolder named after the post, so previous exports are never overwritten. Ordinary images and GIFs retain their format. Live Photos are saved as matching image/MOV pairs, such as `02.jpg` and `02.mov`; a folder does not play them as Live Photos.
 
@@ -265,7 +265,7 @@ See [ios-shortcut/README.md](ios-shortcut/README.md) for setup.
 
 ## Development checks
 
-Run `./scripts/check.command` from the project root. Requires Node.js 22+, Python 3.10+, and Apple Command Line Tools. It runs regression tests, checks script syntax, compiles AppleScript, and performs a real connector installation and protocol check in a temporary directory. Swift compilation uses the selected toolchain's macOS SDK. Temporary outputs are removed automatically. Tests do not write to your photo library.
+Run `./scripts/check.command` from the project root. Requires Node.js 22+, Python 3.10+, Google Chrome, and Apple Command Line Tools. It runs regression tests and 18 real Chrome layout checks at 360, 480 and 600px heights, checks script syntax, compiles AppleScript, and performs a real connector installation and protocol check in a temporary directory. Swift compilation uses the selected toolchain's macOS SDK. Temporary outputs are removed automatically. Tests do not write to your photo library.
 
 GitHub Actions runs the same checks on macOS for pushes to `main` and pull requests, using the minimum supported Python 3.10.
 

@@ -441,3 +441,38 @@ test("folder sheet resumes after popup closure and applies only after confirmati
   assert.equal(app.localData.destinationPreferences.destination, "folder");
   assert.equal(popup.controls.targetDialog.open, false);
 });
+
+test("history displays the first saved preview when the CDN URL uses HTTP", async () => {
+  const app = extension();
+  app.localData.saveHistory = [{ savedAt: new Date().toISOString(), title: "HTTP preview", pageUrl: app.note.url,
+    previewUrl: "http://sns-webpic-qc.xhscdn.com/preview.jpg", items: [{ index: 1, kind: "image", format: "jpg" }] }];
+  const popup = app.openPopup();
+  await until(() => popup.controls.imageGrid.children.length === 2);
+  const row = popup.controls.historyList.children.find(child => child.className === "history-row");
+  assert.equal(row.children[0].src, "http://sns-webpic-qc.xhscdn.com/preview.jpg");
+});
+
+test("an old record without a preview recovers its first saved image from the current note", async () => {
+  const app = extension(); app.note.images[0].index = 3; app.note.images[1].index = 8;
+  app.localData.saveHistory = [{ savedAt: new Date().toISOString(), pageUrl: app.note.url, title: "Old record",
+    items: [{ index: 8, kind: "image", format: "jpg" }] }];
+  const popup = app.openPopup();
+  await until(() => app.localData.saveHistory[0].previewUrl);
+  assert.equal(app.localData.saveHistory[0].previewUrl, app.note.images[1].url);
+  const row = popup.controls.historyList.children.find(child => child.className === "history-row");
+  assert.equal(row.children[0].src, app.note.images[1].url);
+});
+
+test("the visible primary button returns from a saved result without downloading again", async () => {
+  const app = extension(); const popup = app.openPopup(); const c = popup.controls;
+  await until(() => c.imageGrid.children.length === 2);
+  void c.saveButton.click(); await until(() => app.ports.length === 1);
+  app.ports[0].reply({ ok: true, saved: 2, failedIndices: [], items: [{ index: 1 }, { index: 2 }] });
+  await until(() => !app.data.connectorJob.busy);
+  assert.equal(c.saveButton.classList.contains("hidden"), false);
+  assert.equal(c.saveButtonLabel.textContent, "继续选图");
+  await c.saveButton.click();
+  assert.equal(c.saveButtonLabel.textContent, "导入 2 张");
+  assert.equal(app.ports.length, 1);
+  assert.equal(c.imageGrid.children[0].children[0].disabled, false);
+});

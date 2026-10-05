@@ -75,10 +75,12 @@ async function runJob(payload) {
   if (payload.action === "save" && result.saved > 0) {
     try {
       const { saveHistory = [] } = await chrome.storage.local.get("saveHistory");
+      const firstSaved = result.items?.[0];
+      const original = payload.images.find(image => image.index === firstSaved?.index);
       await chrome.storage.local.set({ saveHistory: [{
         savedAt: new Date().toISOString(), pageUrl: payload.pageUrl, title: payload.title,
         destination: payload.destination, albumName: payload.albumName,
-        previewUrl: payload.images.find(image => image.index === result.items?.[0]?.index)?.previewUrl || "",
+        previewUrl: original?.previewUrl || original?.url || firstSaved?.url || "",
         folderPath: result.folderPath,
         items: (result.items || []).map(({ index, kind, format, quality }) => ({ index, kind, format, quality }))
       }, ...saveHistory].slice(0, 100) });
