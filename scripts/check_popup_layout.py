@@ -56,6 +56,7 @@ def main():
           <script>window.addEventListener('load',()=>setTimeout(()=>{
             const results=[...document.querySelectorAll('iframe')].map(frame=>{
               const w=frame.contentWindow,d=frame.contentDocument,footer=d.querySelector('#actionBar');
+              w.dispatchEvent(new w.Event('resize'));
               const button=d.querySelector(frame.title.startsWith('progress')?'#stopButton':'#saveButton');
               const r=footer.getBoundingClientRect(),b=button.getBoundingClientRect();
               return {state:frame.title,height:w.innerHeight,bottom:r.bottom,

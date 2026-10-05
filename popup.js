@@ -673,3 +673,10 @@ async function initialize() {
 }
 
 initialize().catch((error) => setEmpty("读取失败", error.message || "请重新打开扩展"));
+
+// Start with an intrinsic size. Chrome constrains the actual toolbar viewport
+// afterward; viewport-based CSS during startup creates a sizing feedback loop.
+window.addEventListener("resize", () => {
+  document.body.style.width = `${Math.min(420, window.innerWidth)}px`;
+  document.body.style.height = `${Math.min(600, window.innerHeight)}px`;
+});

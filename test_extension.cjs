@@ -128,7 +128,7 @@ function extension({ statusResult = { ok: true, protocolVersion: 3 } } = {}) {
       scripting: { executeScript: async () => [{ result: note }] }
     };
     vm.runInNewContext(read("popup.js"), {
-      chrome, document: { querySelector: (selector) => controls[selector.slice(1)], createElement: () => new Control() },
+      chrome, window: { addEventListener: () => {} }, document: { querySelector: (selector) => controls[selector.slice(1)], createElement: () => new Control() },
       Option: Control, clearTimeout: () => {}, setTimeout: () => 1
     });
     return { controls, close: () => {

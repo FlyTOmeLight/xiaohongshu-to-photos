@@ -7,6 +7,7 @@ trap 'rm -rf "$check_dir"' EXIT
 
 node --test test_extension.cjs test_content.cjs
 python3 -B scripts/check_popup_layout.py
+python3 -B scripts/check_toolbar_popup.py --chrome "${TOOLBAR_TEST_CHROME:-/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing}"
 python3 -B -m unittest discover -s native-host -p 'test_*.py' -v
 for source_file in background.js popup.js content.js note-parser.js; do
   node --check "$source_file"
