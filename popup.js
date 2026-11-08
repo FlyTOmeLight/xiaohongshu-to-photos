@@ -30,7 +30,7 @@ const elements = {
   duplicateHint: document.querySelector("#duplicateHint")
 };
 
-let note = { title: "小红书笔记", images: [] };
+let note = { title: "小红书笔记", url: "", site: "xhs", images: [] };
 let selected = new Set();
 let toastTimer;
 let busy = false;
@@ -58,12 +58,31 @@ function switchHistory() {
   elements.actionBar.classList.toggle("hidden", historyOpen || !note.images.length);
   ui.historyButton.textContent = historyOpen ? "选图" : "记录";
 }
+const XHS_HOST = /^https?:\/\/([\w-]+\.)*xiaohongshu\.com\//i;
+const X_HOST = /^https?:\/\/(?:[\w-]+\.)*(?:x|twitter)\.com\//i;
+const X_STATUS_PATH = /^\/[^/]+\/status(?:es)?\/\d+/i;
+const X_ARTICLE_PATH = /^\/[^/]+\/article\/\d+(?:\/|$)/i;
+function siteFromUrl(url) {
+  if (XHS_HOST.test(url || "")) return "xhs";
+  if (X_HOST.test(url || "")) return "x";
+  return "";
+}
+function isX(noteOrSite) {
+  return (typeof noteOrSite === "string" ? noteOrSite : noteOrSite?.site) === "x";
+}
+function defaultTitle(site) {
+  return isX(site) ? "X 帖子或文章" : "小红书笔记";
+}
+function kindLabel(kind) {
+  return kind === "live" ? "实况" : kind === "gif" ? "GIF" : kind === "video" ? "视频" : "图片";
+}
 function showDetails(title, text, url = "") {
   ui.detailTitle.textContent = title;
   ui.detailText.textContent = text;
-  const valid = /^https?:\/\/([\w-]+\.)*xiaohongshu\.com\//i.test(url);
+  const valid = XHS_HOST.test(url) || X_HOST.test(url);
   ui.sourceLink.classList.toggle("hidden", !valid);
   ui.sourceLink.href = valid ? url : "";
+  ui.sourceLink.textContent = isX(siteFromUrl(url)) ? "打开原帖 ↗" : "打开原笔记 ↗";
   openDialog(ui.detailsDialog);
 }
 function renderPreview() {
@@ -76,15 +95,20 @@ function renderPreview() {
 }
 
 function noteIdentity(url) {
-  return String(url || "").match(/\/(?:explore|discovery\/item)\/([0-9a-z]+)/i)?.[1] || "";
+  const value = String(url || "");
+  if (X_HOST.test(value)) return value.match(/\/(?:status(?:es)|article)\/(\d+)/i)?.[1] || "";
+  return value.match(/\/(?:explore|discovery\/item)\/([0-9a-z]+)/i)?.[1] || "";
 }
 
+function samePage(a, b) {
+  return Boolean(noteIdentity(a)) && noteIdentity(a) === noteIdentity(b) && siteFromUrl(a) === siteFromUrl(b);
+}
 function historyPreviewUrl(record) {
   const first = record.items[0];
-  const matchingNote = noteIdentity(record.pageUrl) && noteIdentity(record.pageUrl) === noteIdentity(note.url);
+  const matchingNote = samePage(record.pageUrl, note.url);
   const sourceImage = matchingNote ? note.images.find((item, index) => (item.index || index + 1) === first?.index) : null;
   const job = session.connectorJob;
-  const savedImage = noteIdentity(record.pageUrl) && noteIdentity(record.pageUrl) === noteIdentity(job?.payload?.pageUrl)
+  const savedImage = samePage(record.pageUrl, job?.payload?.pageUrl)
     ? job.payload.images?.find(item => item.index === first?.index) : null;
   return record.previewUrl || first?.previewUrl || first?.url
     || sourceImage?.previewUrl || sourceImage?.url || savedImage?.previewUrl || savedImage?.url;
@@ -129,7 +153,7 @@ function renderHistory() {
       row.append(image);
     } else row.append(thumb);
     const copy = document.createElement("span"); copy.className = "history-copy";
-    const title = document.createElement("b"); title.textContent = record.title || "小红书笔记";
+    const title = document.createElement("b"); title.textContent = record.title || defaultTitle(siteFromUrl(record.pageUrl));
     const detail = document.createElement("small");
     detail.textContent = `${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · ${record.items.length} 张`;
     const target = document.createElement("em");
@@ -137,7 +161,7 @@ function renderHistory() {
     copy.append(title, detail, target); row.append(copy);
     row.addEventListener("click", () => showDetails(record.title || "保存记录", [
       date.toLocaleString(), `保存位置：${target.textContent}`,
-      ...record.items.map(item => `第 ${item.index} 张 · ${item.kind === "live" ? "实况" : item.kind === "gif" ? "GIF" : "图片"} · ${item.format || ""}${item.quality === "page" ? " · 页面版本" : ""}`)
+      ...record.items.map(item => `第 ${item.index} 张 · ${kindLabel(item.kind)} · ${item.format || ""}${item.quality === "page" ? " · 页面版本" : ""}`)
     ].join("\n"), record.pageUrl));
     elements.history.append(row);
   }
@@ -146,7 +170,7 @@ function renderHistory() {
 
 function updateDuplicateHint() {
   const id = noteIdentity(note.url);
-  const saved = new Set(saveHistory.filter((record) => id && noteIdentity(record.pageUrl) === id)
+  const saved = new Set(saveHistory.filter((record) => id && samePage(record.pageUrl, note.url))
     .flatMap((record) => record.items.map((item) => item.index)));
   const count = note.images.filter((item, index) => selected.has(index) && saved.has(item.index || index + 1)).length;
   elements.duplicateHint.textContent = count ? `已选图片中有 ${count} 张曾保存。继续保存会再导出一次。` : "";
@@ -154,7 +178,7 @@ function updateDuplicateHint() {
 }
 
 function bestNoteResult(candidates, tabUrl) {
-  const wantedId = String(tabUrl || "").match(/\/(?:explore|discovery\/item)\/([0-9a-z]+)/i)?.[1] || "";
+  const wantedId = noteIdentity(tabUrl);
   return candidates.filter((candidate) => candidate?.images?.length).sort((a, b) => {
     const score = (candidate) => {
       const idScore = wantedId && candidate.noteId === wantedId ? 1000000 : candidate.noteId ? -1000000 : 0;
@@ -200,7 +224,7 @@ function updateDestinationUi() {
   elements.folderSettings.classList.toggle("hidden", !local);
   elements.destinationHint.textContent = local
     ? "选择文件夹后若弹窗关闭，再点扩展即可继续"
-    : "原图、GIF、实况 · 可同步 iCloud";
+    : "原图、GIF、实况、视频 · 可同步 iCloud";
 }
 
 function showSaveResult(payload, result) {
@@ -345,7 +369,7 @@ function renderGallery() {
 
     const image = document.createElement("img");
     image.src = item.previewUrl || item.url;
-    image.alt = `笔记图片 ${item.index || index + 1}`;
+    image.alt = `${isX(note) ? "帖子媒体" : "笔记图片"} ${item.index || index + 1}`;
     image.loading = "lazy";
     image.referrerPolicy = "no-referrer";
 
@@ -358,7 +382,7 @@ function renderGallery() {
 
     const badge = document.createElement("span");
     badge.className = "media-badge";
-    badge.textContent = item.kind === "live" ? "LIVE" : item.kind === "gif" ? "GIF" : "";
+    badge.textContent = item.kind === "live" ? "LIVE" : item.kind === "gif" ? "GIF" : item.kind === "video" ? "视频" : "";
     badge.classList.toggle("hidden", !badge.textContent);
 
     pick.append(image, check, number, badge);
@@ -392,10 +416,17 @@ async function collect() {
   elements.result.classList.add("hidden");
   setView("loading");
   elements.refresh.disabled = true;
+  let site = "";
+  let supported = false;
   try {
     const tab = await getSourceTab();
-    if (!tab?.id || !/^https?:\/\/([\w-]+\.)*xiaohongshu\.com\//i.test(tab.url || "")) {
-      setEmpty("这不是小红书页面", "请先在网页版小红书打开一篇图文笔记，然后再试一次。");
+    site = siteFromUrl(tab?.url);
+    supported = site === "x"
+      ? (X_STATUS_PATH.test(new URL(tab.url).pathname) || X_ARTICLE_PATH.test(new URL(tab.url).pathname))
+      : site === "xhs";
+    if (!tab?.id || !supported) {
+      if (site === "x") setEmpty("这不是 X 帖子或文章页面", "请在 X 打开一条帖子或文章的详情页（地址含 /status/ 或 /article/），然后再试一次。");
+      else setEmpty("这不是小红书页面", "请先在网页版小红书打开一篇图文笔记，然后再试一次。");
       return;
     }
 
@@ -415,7 +446,7 @@ async function collect() {
       const injected = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         world: "MAIN",
-        func: () => globalThis.RednoteParser.fromState(window.__INITIAL_STATE__, location.href, document.title)
+        func: () => globalThis.RednoteParser.fromPage(globalThis, document, location.href, document.title)
       });
       runtimeResponse = injected?.[0]?.result || null;
     } catch {
@@ -424,13 +455,16 @@ async function collect() {
     response = bestNoteResult([response, runtimeResponse], tab.url || "");
 
     if (!response?.images?.length) {
-      setEmpty("没有找到可保存的图片", "试试先点开笔记详情、等待图片加载完成，再重新读取。");
+      setEmpty("没有找到可保存的图片", site === "x"
+        ? "试试展开帖子或文章里的图片、等待加载完成，再重新读取。"
+        : "试试先点开笔记详情、等待图片加载完成，再重新读取。");
       return;
     }
 
     note = {
-      title: response.title || "小红书笔记",
+      title: response.title || defaultTitle(site),
       url: response.url || tab.url || "",
+      site: site || "xhs",
       images: response.images
     };
     selected = new Set(note.images.map((_, index) => index));
@@ -454,7 +488,7 @@ async function collect() {
       updateDestinationUi(); openDialog(ui.targetDialog);
     }
   } catch (error) {
-    setEmpty("读取失败", error?.message || "请刷新小红书页面后重试。");
+    setEmpty("读取失败", error?.message || (site === "x" ? "请刷新 X 页面后重试。" : "请刷新小红书页面后重试。"));
   } finally {
     elements.refresh.disabled = busy;
   }
@@ -618,6 +652,7 @@ elements.save.addEventListener("click", async () => {
       folderPath,
       title: note.title,
       pageUrl: note.url,
+      site: note.site || siteFromUrl(note.url) || "xhs",
       images: note.images.flatMap((item, index) => selected.has(index) ? [{
         index: item.index || index + 1,
         url: item.url,

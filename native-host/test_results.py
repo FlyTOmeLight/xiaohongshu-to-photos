@@ -114,3 +114,75 @@ class SaveResultTests(MediaTestCase):
             self.assertEqual(result['saved'], 1)
             self.assertIn('来源记录写入失败', result['sourceWarning'])
             self.assertEqual({p.name for p in Path(result['folderPath']).iterdir()}, {'01.gif'})
+
+
+class XVideoResultTests(MediaTestCase):
+    def test_video_without_a_direct_source_does_not_download_the_poster(self):
+        with mock.patch.object(host, 'download_video') as video:
+            result = host.process({'images': [{
+                'index': 1,
+                'url': 'https://pbs.twimg.com/amplify_video_thumb/1/img/poster.jpg',
+                'kind': 'video',
+            }]})
+        self.assertFalse(result['ok'])
+        self.assertIn('没有找到视频直链', result['error'])
+        video.assert_not_called()
+
+    def test_placeholder_promotional_image_is_rejected(self):
+        with mock.patch.object(host, 'download_image') as download:
+            result = host.process({'images': [{
+                'index': 1,
+                'url': 'https://abs.twimg.com/rweb/ssr/default/v2/og/image.png',
+                'kind': 'image',
+            }]})
+        self.assertFalse(result['ok'])
+        self.assertIn('跳过平台默认宣传图', result['error'])
+        download.assert_not_called()
+
+    def test_mp4_video_and_animated_gif_export_as_video_with_actual_suffix(self):
+        import io
+        import json
+        url = 'https://video.twimg.com/tweet_video/example.mp4'
+        payloads = [
+            {'url': url, 'kind': 'video'},
+            {'url': 'https://pbs.twimg.com/media/poster?format=jpg', 'kind': 'gif', 'videoUrl': url},
+            {'url': url, 'kind': 'gif'},
+        ]
+        for item in payloads:
+            with self.subTest(item=item), tempfile.TemporaryDirectory() as directory:
+                response = mock.MagicMock()
+                response.__enter__.return_value = response
+                response.headers = {}
+                data = b'\x00\x00\x00\x18ftypisom' + b'\x00' * 16
+                response.read.side_effect = io.BytesIO(data).read
+                with (mock.patch.object(host, 'open_download', return_value=response),
+                      mock.patch.object(host, 'download_image') as image,
+                      mock.patch.object(host, 'prepare_live_photo') as pair):
+                    result = host.process({'destination': 'folder', 'folderPath': directory,
+                                           'images': [{**item, 'index': 4}]})
+                self.assertTrue(result['ok'])
+                self.assertEqual(result['liveFallback'], 0)
+                self.assertEqual(result['items'][0]['kind'], 'video')
+                self.assertEqual(result['items'][0]['format'], 'mp4')
+                folder = Path(result['folderPath'])
+                self.assertEqual((folder / '04.mp4').read_bytes(), data)
+                source = json.loads((folder / 'source.json').read_text())
+                self.assertEqual(source['items'][0]['files'], ['04.mp4'])
+                self.assertEqual(source['items'][0]['url'], url)
+                image.assert_not_called()
+                pair.assert_not_called()
+
+    def test_standalone_video_imports_one_resource_and_reports_failed_item(self):
+        path = self.temporary_file('.mp4')
+        url = 'https://video.twimg.com/a.mp4'
+        with (mock.patch.object(host, 'download_video', side_effect=[ValueError('不支持 HLS'), (path, 'mp4')]),
+              mock.patch.object(host, 'import_to_photos', return_value=(True, 1, '')) as importer,
+              mock.patch.object(host, 'prepare_live_photo') as pair):
+            result = host.process({'images': [{'index': 2, 'url': url, 'kind': 'video'},
+                                             {'index': 8, 'url': url, 'kind': 'video'}]})
+        self.assertTrue(result['ok'])
+        self.assertEqual((result['saved'], result['failedIndices']), (1, [2]))
+        self.assertEqual(result['items'][0]['index'], 8)
+        importer.assert_called_once_with([path], '')
+        pair.assert_not_called()
+        self.assertFalse(path.exists())

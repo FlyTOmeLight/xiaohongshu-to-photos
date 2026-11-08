@@ -96,9 +96,12 @@ def main():
               }setTimeout(()=>report('settled'),500);
             ''')
             with (work / 'chrome.log').open('w') as log:
-                process = subprocess.Popen([args.chrome, f'--user-data-dir={work}/profile', '--no-first-run',
-                    '--no-default-browser-check', f'--load-extension={extension}', '--window-size=1000,850', 'about:blank'],
-                    stdout=log, stderr=log, start_new_session=True)
+                try:
+                    process = subprocess.Popen([args.chrome, f'--user-data-dir={work}/profile', '--no-first-run',
+                        '--no-default-browser-check', f'--load-extension={extension}', '--window-size=1000,850', 'about:blank'],
+                        stdout=log, stderr=log, start_new_session=True)
+                except FileNotFoundError as error:
+                    raise RuntimeError(f'Chrome executable not found: {args.chrome}') from error
                 try:
                     deadline = time.monotonic() + 25
                     while time.monotonic() < deadline:
@@ -113,7 +116,8 @@ def main():
                                 and report['saveHeight'] > 0 and report['footerBottom'] <= report['height'] + 1):
                             raise AssertionError(json.dumps(report, ensure_ascii=False))
                     if len(settled) != 2:
-                        raise AssertionError(f'Toolbar popup did not open and reopen: {reports}')
+                        log_text = (work / 'chrome.log').read_text(errors='replace')[-4000:]
+                        raise AssertionError(f'Toolbar popup did not open and reopen: {reports}; Chrome log: {log_text}')
                     if settled[1]['saveLabel'] != '继续选图':
                         raise AssertionError('Reopened popup did not restore the saved result')
                     print('Actual Chrome toolbar popup: startup and reopening passed, '

@@ -42,7 +42,7 @@ class Control {
   click() { return this.disabled ? undefined : this.handlers.click ? this.handlers.click() : this.children[0]?.click(); }
 }
 
-function extension({ statusResult = { ok: true, protocolVersion: 3 } } = {}) {
+function extension({ statusResult = { ok: true, protocolVersion: 3 }, fetchImpl = globalThis.fetch } = {}) {
   const data = {};
   const localData = {};
   const listeners = new Set();
@@ -99,7 +99,9 @@ function extension({ statusResult = { ok: true, protocolVersion: 3 } } = {}) {
     }
   };
   function restartWorker() {
-    vm.runInNewContext(read("background.js"), { chrome: { runtime, storage } });
+    vm.runInNewContext(read("background.js"), {
+      chrome: { runtime, storage }, URL, fetch: (...args) => fetchImpl(...args)
+    });
   }
   restartWorker();
   const note = {
@@ -136,13 +138,66 @@ function extension({ statusResult = { ok: true, protocolVersion: 3 } } = {}) {
       subscriptions.forEach((listener) => listeners.delete(listener));
     } };
   }
-  return { data, localData, ports, openPopup, note, requests, restartWorker };
+  return { data, localData, ports, openPopup, note, requests, restartWorker,
+    message: (message) => new Promise((resolve) => handleMessage(message, {}, resolve)) };
 }
 
 test("toolbar opens the anchored popup with a fixed compact width", () => {
   const manifest = JSON.parse(read("manifest.json"));
   assert.equal(manifest.action.default_popup, "popup.html");
   assert.match(read("popup.css"), /body\s*\{[^}]*width: 420px/s);
+});
+
+test("X video resolution returns the best MP4 variants", async () => {
+  const requested = [];
+  const app = extension({ fetchImpl: async (url) => {
+    requested.push(url);
+    return { ok: true, json: async () => ({ mediaDetails: [{
+      type: "video",
+      media_url_https: "https://pbs.twimg.com/amplify_video_thumb/123/img/poster.jpg",
+      video_info: { variants: [
+        { content_type: "application/x-mpegURL", url: "https://video.twimg.com/pl/list.m3u8" },
+        { content_type: "video/mp4", bitrate: 256000, url: "https://video.twimg.com/lo.mp4" },
+        { content_type: "video/mp4", bitrate: 832000, url: "https://video.twimg.com/hi.mp4" },
+      ] },
+    }] }) };
+  } });
+  const result = await app.message({ type: "RESOLVE_X_MEDIA", statusId: "2119380630018613658" });
+  assert.equal(result.ok, true);
+  assert.match(requested[0],
+    /^https:\/\/cdn\.syndication\.twimg\.com\/tweet-result\?id=2119380630018613658&lang=en&token=/);
+  assert.deepEqual([...result.media[0].videoUrls],
+    ["https://video.twimg.com/hi.mp4", "https://video.twimg.com/lo.mp4"]);
+});
+
+test("X media resolution also returns tweet photos", async () => {
+  const app = extension({ fetchImpl: async () => ({ ok: true, json: async () => ({
+    mediaDetails: [{
+      type: "photo",
+      media_url_https: "https://pbs.twimg.com/media/detail?format=jpg&name=small",
+      original_info: { width: 1200, height: 800 },
+    }],
+    photos: [
+      { url: "https://pbs.twimg.com/media/detail?format=jpg&name=large", width: 1200, height: 800 },
+      { url: "https://pbs.twimg.com/media/photo-only?format=jpg&name=small", width: 900, height: 1600 },
+    ],
+  }) }) });
+  const result = await app.message({ type: "RESOLVE_X_MEDIA", statusId: "2119381338956734824" });
+  assert.equal(result.ok, true);
+  assert.deepEqual([...result.media].map((entry) => entry.type), ["photo", "photo"]);
+  assert.deepEqual([...result.media].map((entry) => entry.url), [
+    "https://pbs.twimg.com/media/detail?format=jpg&name=small",
+    "https://pbs.twimg.com/media/photo-only?format=jpg&name=small",
+  ]);
+  assert.deepEqual([result.media[1].width, result.media[1].height], [900, 1600]);
+});
+
+test("X video resolution rejects invalid ids without a request", async () => {
+  let called = false;
+  const app = extension({ fetchImpl: async () => { called = true; } });
+  const result = await app.message({ type: "RESOLVE_X_MEDIA", statusId: "../bad" });
+  assert.equal(result.ok, false);
+  assert.equal(called, false);
 });
 
 test("folder selection survives popup closure and restores selected images", async () => {

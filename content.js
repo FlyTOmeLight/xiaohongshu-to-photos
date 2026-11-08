@@ -1,6 +1,7 @@
 (() => {
   const MIN_WIDTH = 240;
   const MIN_HEIGHT = 180;
+  const SITE = RednoteParser.siteFromUrl(location.href);
 
   function unwrapCssUrl(value) {
     const match = value?.match(/url\(["']?(.*?)["']?\)/i);
@@ -166,6 +167,194 @@
       }));
   }
 
+  function metaContent(selector) {
+    return document.querySelector(selector)?.content?.trim() || "";
+  }
+
+  function getTweetTitle() {
+    const text = document.querySelector('[data-testid="tweetText"]')?.textContent?.trim();
+    if (text) return text.replace(/\s+/g, " ").slice(0, 80);
+    const meta = metaContent('meta[property="og:title"]');
+    if (meta) {
+      return meta.replace(/^.*?\bon X:\s*["“]?/, "").replace(/["”]$/, "").replace(/\s+/g, " ").trim().slice(0, 80)
+        || meta.replace(/\s+/g, " ").slice(0, 80);
+    }
+    return document.title.replace(/\s*\/\s*X$/, "").replace(/\s+/g, " ").trim().slice(0, 80) || "X 帖子";
+  }
+
+  function tweetMediaFromDom() {
+    const articlePage = RednoteParser.articleIdFromUrl(location.href);
+    const articleRoot = articlePage
+      ? document.querySelector('[data-article-part="body"]')?.parentElement || document.querySelector('[data-article-part="body"]')
+      : document.querySelector('article[data-testid="tweet"]') || document;
+    const modal = document.querySelector('div[aria-modal="true"]')
+      || document.querySelector('div[data-testid="swipe-to-dismiss"]')
+      || document.querySelector('#layers');
+    const modalRoot = modal?.querySelector?.('img[src*="pbs.twimg.com/media/"], video') ? modal : null;
+    const root = modalRoot || articleRoot;
+    const items = [];
+    const seen = new Set();
+    const push = (item) => {
+      if (!item.url || seen.has(item.url)) return;
+      seen.add(item.url);
+      items.push({ ...item, index: items.length + 1 });
+    };
+
+    const mediaLinkId = RednoteParser.articleMediaIdFromUrl(location.href);
+    root?.querySelectorAll('a[href*="/article/"] img[src*="pbs.twimg.com/media/"], img[src*="pbs.twimg.com/media/"]').forEach((img) => {
+      const link = img.closest?.('a[href*="/article/"]');
+      const linkMediaId = link?.href ? RednoteParser.articleMediaIdFromUrl(link.href) : "";
+      if (mediaLinkId && linkMediaId && linkMediaId !== mediaLinkId) return;
+      const url = RednoteParser.tweetImageUrl(img.currentSrc || img.src, location.href, "orig");
+      if (!url) return;
+      push({ url, previewUrl: RednoteParser.tweetImageUrl(url, location.href, "small"),
+        width: img.naturalWidth || 0, height: img.naturalHeight || 0,
+        kind: /\.gif(?:$|[?#])/i.test(url) ? "gif" : "image", videoUrl: "", videoUrls: [] });
+    });
+
+    root?.querySelectorAll("video").forEach((video) => {
+      const rawPoster = video.poster || video.getAttribute?.("poster")
+        || unwrapCssUrl(video.parentElement?.style?.backgroundImage)
+        || unwrapCssUrl(video.closest?.('[data-testid="videoComponent"]')?.style?.backgroundImage);
+      const poster = RednoteParser.tweetImageUrl(rawPoster, location.href, "orig");
+      const direct = [video.currentSrc, video.src, ...[...(video.querySelectorAll?.("source") || [])].map((source) => source.src)]
+        .find((value) => /^https?:/i.test(value || "") && /\.mp4(?:$|[?#])/i.test(value));
+      const videoUrl = direct || metaContent('meta[property="og:video"]');
+      const ogImage = RednoteParser.tweetImageUrl(metaContent('meta[property="og:image"]'), location.href, "orig");
+      const url = poster || ogImage || (RednoteParser.statusIdFromUrl(location.href) ? "x-video-pending" : "");
+      if (!url && !videoUrl) return;
+      const gif = /tweet_video/i.test(poster) || /tweet_video/i.test(videoUrl);
+      push({ url: url || videoUrl, previewUrl: poster, width: 0, height: 0,
+        kind: gif ? "gif" : "video", videoUrl, videoUrls: videoUrl ? [videoUrl] : [] });
+    });
+
+    if (!items.length && !articlePage) {
+      const image = RednoteParser.tweetImageUrl(
+        metaContent('meta[property="og:image"]') || metaContent('meta[name="twitter:image"]'), location.href, "orig");
+      const videoUrl = metaContent('meta[property="og:video"]');
+      if (videoUrl) push({ url: image || videoUrl, previewUrl: image, width: 0, height: 0,
+        kind: /tweet_video/i.test(videoUrl) ? "gif" : "video", videoUrl, videoUrls: [videoUrl] });
+      else if (image) push({ url: image, previewUrl: RednoteParser.tweetImageUrl(image, location.href, "small"),
+        width: 0, height: 0, kind: "image", videoUrl: "", videoUrls: [] });
+    }
+    return items;
+  }
+
+  function xVideoMediaKey(url) {
+    try {
+      const parsed = new URL(url);
+      if (!/(?:^|\.)pbs\.twimg\.com$/i.test(parsed.hostname)) return "";
+      return parsed.pathname.match(
+        /\/(?:amplify_video_thumb|tweet_video_thumb|ext_tw_video_thumb)\/(\d+)\//i
+      )?.[1] || "";
+    } catch {
+      return "";
+    }
+  }
+
+  function needsXVideoLookup(item) {
+    return (item.kind === "video" || item.kind === "gif") && !/^https?:/i.test(item.videoUrl || "");
+  }
+
+  function resolveXVideoMedia(statusId) {
+    return new Promise((resolve) => {
+      try {
+        chrome.runtime.sendMessage({ type: "RESOLVE_X_MEDIA", statusId }, (response) => {
+          if (chrome.runtime.lastError) {
+            resolve([]);
+            return;
+          }
+          resolve(Array.isArray(response?.media) ? response.media : []);
+        });
+      } catch {
+        resolve([]);
+      }
+    });
+  }
+
+  async function enrichTweetVideos(statusId, images) {
+    let media;
+    try {
+      media = (await resolveXVideoMedia(statusId)).filter((entry) =>
+        entry && Array.isArray(entry.videoUrls) && entry.videoUrls.length);
+    } catch {
+      return images;
+    }
+    if (!media.length) return images;
+    const used = new Set();
+    return images.map((item) => {
+      if (!needsXVideoLookup(item)) return item;
+      const key = xVideoMediaKey(item.url);
+      let position = key ? media.findIndex((entry) => xVideoMediaKey(entry.poster) === key) : -1;
+      if (position < 0) position = media.findIndex((_, index) => !used.has(index));
+      if (position < 0) return item;
+      used.add(position);
+      const entry = media[position];
+      const videoUrls = entry.videoUrls.filter((url) => /^https?:/i.test(url));
+      if (!videoUrls.length) return item;
+      const poster = entry.poster || "";
+      const url = (!item.url || item.url === "x-video-pending" || RednoteParser.isPlaceholderImageUrl(item.url)) && poster
+        ? poster
+        : item.url;
+      const previewUrl = item.previewUrl || poster || url;
+      return { ...item, url, previewUrl, videoUrl: videoUrls[0], videoUrls };
+    });
+  }
+
+  function syndicationImageItems(media) {
+    return media.flatMap((entry, index) => {
+      if (!entry || typeof entry !== "object") return [];
+      const rawUrl = entry.url || entry.poster || "";
+      const url = RednoteParser.tweetImageUrl(rawUrl, location.href, "orig") || validHttpUrl(rawUrl);
+      if (!url) return [];
+      const rawPreview = entry.poster || entry.url || url;
+      const previewUrl = RednoteParser.tweetImageUrl(rawPreview, location.href, "small") || url;
+      const videoUrls = (Array.isArray(entry.videoUrls) ? entry.videoUrls : [])
+        .filter((value) => /^https?:/i.test(value || ""));
+      const type = String(entry.type || "");
+      const kind = type === "animated_gif" ? "gif"
+        : type === "video" || videoUrls.length ? "video"
+          : /\.gif(?:$|[?#])/i.test(url) ? "gif" : "image";
+      return [{
+        index: index + 1,
+        url,
+        previewUrl,
+        width: Number(entry.width) || 0,
+        height: Number(entry.height) || 0,
+        kind,
+        videoUrl: videoUrls[0] || "",
+        videoUrls
+      }];
+    });
+  }
+
+  function collectTweetNote() {
+    const noteId = RednoteParser.xContentIdFromUrl(location.href);
+    const statusId = RednoteParser.statusIdFromUrl(location.href);
+    if (!noteId) return null;
+    const title = RednoteParser.articleIdFromUrl(location.href) ? getArticleTitle() : getTweetTitle();
+    const structured = RednoteParser.fromPage(globalThis, document, location.href, title);
+    if (structured) return structured;
+    const images = tweetMediaFromDom();
+    const note = { noteId, title, url: location.href, images };
+    if (statusId && !images.length) {
+      return resolveXVideoMedia(statusId).then((media) => {
+        const fallback = syndicationImageItems(media);
+        return fallback.length ? { ...note, images: fallback } : null;
+      });
+    }
+    if (!images.length) return null;
+    return statusId && images.some(needsXVideoLookup)
+      ? enrichTweetVideos(statusId, images).then((enriched) => ({ ...note, images: enriched }))
+      : note;
+  }
+
+  function getArticleTitle() {
+    const title = document.querySelector('[data-article-part="title"]')?.textContent?.trim();
+    if (title) return title.replace(/\s+/g, " ").slice(0, 80);
+    return document.title.replace(/\s*\|\s*X$/, "").replace(/\s+/g, " ").trim().slice(0, 80) || "X 文章";
+  }
+
   function getTitle() {
     const selectors = [
       "#detail-title",
@@ -184,6 +373,21 @@
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type !== "COLLECT_NOTE_IMAGES") return;
+    if (SITE === "x") {
+      const fallback = { title: getTweetTitle(), url: location.href, images: [] };
+      let note = null;
+      try {
+        note = collectTweetNote();
+      } catch {
+        // A page without readable state still gets an empty, well-formed answer.
+      }
+      if (note && typeof note.then === "function") {
+        note.then((value) => sendResponse(value || fallback), () => sendResponse(fallback));
+        return true;
+      }
+      sendResponse(note || fallback);
+      return;
+    }
     let structured = null;
     try {
       structured = collectStructuredNote();

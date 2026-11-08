@@ -5,6 +5,63 @@ let savePort;
 let stopRequested = false;
 const ready = recoverInterruptedJob();
 
+function xSyndicationToken(statusId) {
+  return ((Number(statusId) / 1e15) * Math.PI).toString(36).replace(/(0+|\.)/g, "");
+}
+
+function syndicationMedia(data) {
+  const details = Array.isArray(data?.mediaDetails) ? data.mediaDetails : [];
+  const photos = Array.isArray(data?.photos) ? data.photos : [];
+  const media = new Map();
+  for (const entry of [...details, ...photos]) {
+    if (!entry || typeof entry !== "object") continue;
+    const type = String(entry.type || (entry.video_info ? "video" : "photo"));
+    const poster = String(entry.media_url_https || entry.media_url || entry.url || "");
+    const variants = Array.isArray(entry.video_info?.variants) ? entry.video_info.variants : [];
+    const videoUrls = variants
+      .filter((variant) => /^video\/mp4/i.test(String(variant?.content_type || "")))
+      .sort((a, b) => (Number(b.bitrate) || 0) - (Number(a.bitrate) || 0))
+      .map((variant) => variant.url)
+      .filter((url) => {
+        try {
+          const parsed = new URL(url);
+          return parsed.protocol === "https:" && parsed.hostname.endsWith(".twimg.com");
+        } catch {
+          return false;
+        }
+      });
+    const url = poster || videoUrls[0];
+    if (!url) continue;
+    const key = (() => {
+      try {
+        const parsed = new URL(url);
+        return `${parsed.hostname}${parsed.pathname}`;
+      } catch {
+        return url;
+      }
+    })();
+    if (media.has(key)) continue;
+    media.set(key, {
+      url,
+      poster,
+      type: type === "photo" && videoUrls.length ? "video" : type,
+      width: Number(entry.original_info?.width || entry.sizes?.large?.w || entry.width) || 0,
+      height: Number(entry.original_info?.height || entry.sizes?.large?.h || entry.height) || 0,
+      videoUrls: [...new Set(videoUrls)]
+    });
+  }
+  return [...media.values()];
+}
+
+async function resolveXMedia(statusId) {
+  const token = xSyndicationToken(statusId);
+  const response = await fetch(
+    `https://cdn.syndication.twimg.com/tweet-result?id=${statusId}&lang=en&token=${token}`,
+    { credentials: "omit", cache: "no-store" });
+  if (!response.ok) throw new Error(`读取 X 媒体地址失败（HTTP ${response.status}）`);
+  return { ok: true, media: syndicationMedia(await response.json()) };
+}
+
 async function recoverInterruptedJob() {
   const { connectorJob } = await chrome.storage.session.get("connectorJob");
   if (connectorJob?.busy) {
@@ -93,6 +150,16 @@ async function runJob(payload) {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "RESOLVE_X_MEDIA") {
+    const statusId = String(message.statusId || "");
+    if (!/^\d{1,25}$/.test(statusId)) {
+      sendResponse({ ok: false, error: "无效的 X 帖子编号" });
+      return;
+    }
+    resolveXMedia(statusId).then(sendResponse,
+      (error) => sendResponse({ ok: false, error: error.message || "读取 X 媒体地址失败" }));
+    return true;
+  }
   if (message?.type === "CONNECTOR_CANCEL") {
     if (running) {
       stopRequested = true;

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "红薯收藏夹",
-  "description": "从小红书网页版选择原图、GIF 和实况照片，保存到 macOS“照片”相簿或本地文件夹。",
-  "version": "1.5.2",
+  "description": "从小红书和 X 网页选择图片、GIF、视频和实况照片，保存到 macOS“照片”相簿或本地文件夹。",
+  "version": "1.6.0",
   "minimum_chrome_version": "109",
   "permissions": [
     "activeTab",
@@ -13,7 +13,12 @@
   "host_permissions": [
     "*://*.xiaohongshu.com/*",
     "*://*.xhscdn.com/*",
-    "*://*.xhscdn.net/*"
+    "*://*.xhscdn.net/*",
+    "*://x.com/*",
+    "*://*.x.com/*",
+    "*://twitter.com/*",
+    "*://*.twitter.com/*",
+    "*://*.twimg.com/*"
   ],
   "action": {
     "default_title": "保存小红书图片",
@@ -24,7 +29,11 @@
   "content_scripts": [
     {
       "matches": [
-        "*://*.xiaohongshu.com/*"
+        "*://*.xiaohongshu.com/*",
+        "*://x.com/*",
+        "*://*.x.com/*",
+        "*://twitter.com/*",
+        "*://*.twitter.com/*"
       ],
       "js": [
         "note-parser.js",

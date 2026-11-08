@@ -32,12 +32,28 @@ def check_cancelled():
     if CANCELLED.is_set():
         raise SaveCancelled("任务已停止")
 MAX_IMAGE_BYTES = 80 * 1024 * 1024
+MAX_VIDEO_BYTES = 512 * 1024 * 1024
 LIVE_PHOTO_HELPER = Path(__file__).with_name("live-photo-helper")
 ALLOWED_HOST_SUFFIXES = (
     "xiaohongshu.com",
     "xhscdn.com",
     "xhscdn.net",
+    "x.com",
+    "twitter.com",
+    "twimg.com",
 )
+
+def is_placeholder_url(url: str) -> bool:
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        host = (parsed.hostname or "").lower()
+        if host == "abs.twimg.com" or host.endswith(".abs.twimg.com"):
+            return True
+        if "/default/" in parsed.path and "og/image" in parsed.path:
+            return True
+    except Exception:
+        pass
+    return False
 
 IMPORT_SCRIPT = r'''
 on run argv
@@ -155,12 +171,34 @@ def allowed_url(raw_url: str) -> bool:
     )
 
 
+def is_x_url(raw_url: str) -> bool:
+    hostname = (urllib.parse.urlsplit(raw_url).hostname or "").lower()
+    return any(hostname == suffix or hostname.endswith(f".{suffix}")
+               for suffix in ("x.com", "twitter.com", "twimg.com"))
+
+
 def image_candidates(raw_url: str) -> list[str]:
-    """Return original-quality XHS candidates before the displayed CDN URL."""
+    """Return site-specific originals before the displayed image URL."""
     if not allowed_url(raw_url):
         raise ValueError("不允许的图片地址")
 
     parsed = urllib.parse.urlsplit(raw_url)
+    if is_x_url(raw_url):
+        if parsed.hostname.lower() == "pbs.twimg.com" and parsed.path.startswith("/media/"):
+            path = parsed.path
+            legacy = re.fullmatch(r"(.+\.[A-Za-z0-9]+):(?:orig|large|medium|small|thumb)", path)
+            if legacy:
+                path = legacy.group(1)
+            query = [(key, value) for key, value in urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+                     if key != "name"]
+            # WebP has no original rendition; X serves the JPEG original instead.
+            query = [("format", "jpg") if key == "format" and value == "webp" else (key, value)
+                     for key, value in query]
+            query.append(("name", "orig"))
+            original = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, path,
+                                               urllib.parse.urlencode(query), ""))
+            return list(dict.fromkeys((original, raw_url)))
+        return [raw_url]
     clean_path = parsed.path.split("!", 1)[0]
     original = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, clean_path, "", ""))
     candidates = [original]
@@ -203,7 +241,11 @@ class AllowedRedirectHandler(urllib.request.HTTPRedirectHandler):
         if not allowed_url(new_url):
             response.close()
             raise ValueError("不允许的下载重定向地址")
-        return super().redirect_request(request, response, code, message, headers, new_url)
+        redirected = super().redirect_request(request, response, code, message, headers, new_url)
+        if redirected is not None:
+            redirected.add_header("Referer", "https://x.com/" if is_x_url(new_url)
+                                  else "https://www.xiaohongshu.com/")
+        return redirected
 
 
 def open_download(url: str, accept: str):
@@ -217,7 +259,7 @@ def open_download(url: str, accept: str):
                 "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140 Safari/537.36"
             ),
             "Accept": accept,
-            "Referer": "https://www.xiaohongshu.com/",
+            "Referer": "https://x.com/" if is_x_url(url) else "https://www.xiaohongshu.com/",
         },
     )
     opener = urllib.request.build_opener(AllowedRedirectHandler())
@@ -328,12 +370,19 @@ def live_video_map_from_page(page_url: str) -> dict[str, list[str]]:
 
 def download_media(url: str, accept: str, video: bool = False) -> tuple[Path, str]:
     check_cancelled()
+    if video and urllib.parse.urlsplit(url).path.lower().endswith(".m3u8"):
+        raise ValueError("不支持 HLS 视频，请提供直接 MP4 地址")
+    limit = MAX_VIDEO_BYTES if video else MAX_IMAGE_BYTES
     descriptor, filename = tempfile.mkstemp(prefix="rednote_", suffix=".download")
     path = Path(filename)
     try:
         with os.fdopen(descriptor, "wb") as file, open_download(url, accept) as response:
-            if int(response.headers.get("Content-Length") or 0) > MAX_IMAGE_BYTES:
-                raise ValueError("媒体超过 80 MB")
+            content_type = (response.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+            if video and content_type in {"application/vnd.apple.mpegurl", "application/x-mpegurl",
+                                          "audio/mpegurl", "audio/x-mpegurl"}:
+                raise ValueError("不支持 HLS 视频，请提供直接 MP4 地址")
+            if int(response.headers.get("Content-Length") or 0) > limit:
+                raise ValueError(f"媒体超过 {limit // (1024 * 1024)} MB")
             size = 0
             header = b""
             while True:
@@ -342,15 +391,23 @@ def download_media(url: str, accept: str, video: bool = False) -> tuple[Path, st
                 if not chunk:
                     break
                 size += len(chunk)
-                if size > MAX_IMAGE_BYTES:
-                    raise ValueError("媒体超过 80 MB")
+                if size > limit:
+                    raise ValueError(f"媒体超过 {limit // (1024 * 1024)} MB")
                 header = (header + chunk[:16])[:16]
                 file.write(chunk)
         image_format = sniff_format(header)
         if video:
+            if header[:64].lstrip(b"\xef\xbb\xbf \t\r\n").startswith(b"#EXTM3U"):
+                raise ValueError("不支持 HLS 视频，请提供直接 MP4 地址")
             if len(header) < 12 or header[4:8] != b"ftyp" or image_format:
-                raise ValueError("服务器返回的内容不是受支持的实况视频")
-            media_format = "mov"
+                raise ValueError("服务器返回的内容不是受支持的视频")
+            brand = header[8:12]
+            if brand == b"qt  ":
+                media_format = "mov"
+            elif brand in {b"isom", b"iso2", b"iso3", b"iso4", b"iso5", b"iso6", b"mp41", b"mp42", b"avc1", b"M4V ", b"dash"}:
+                media_format = "mp4"
+            else:
+                raise ValueError("服务器返回的内容不是受支持的 MP4/MOV 视频")
         else:
             if not image_format:
                 raise ValueError("服务器返回的内容不是受支持的图片")
@@ -528,57 +585,90 @@ def process(message: dict, on_progress=None) -> dict:
             fallback_detail = ""
             try:
                 if not isinstance(item, dict) or not allowed_url(item.get("url")):
-                    raise ValueError("不允许的图片地址")
+                    raise ValueError("不允许的媒体地址")
                 url = item["url"]
-                path, used_url, image_format = download_image(url)
-                cleanup_paths.append(path)
-                import_image_path = path
-                import_image_format = image_format
-                media_kind = "gif" if image_format == "gif" else "image"
-
+                if is_placeholder_url(url):
+                    raise ValueError("跳过平台默认宣传图")
                 supplied_video_urls = item.get("videoUrls", [])
                 video_urls = [item.get("videoUrl", "")]
                 if isinstance(supplied_video_urls, list):
                     video_urls.extend(supplied_video_urls[:8])
-                if item.get("kind") == "live" and not any(video_urls):
-                    video_urls.extend(page_live_urls.get(image_identity(url), []))
-                video_urls = list(dict.fromkeys(
-                    value for value in video_urls if isinstance(value, str) and allowed_url(value)
-                ))
-                is_live_item = item.get("kind") == "live" or bool(video_urls)
-                if is_live_item:
-                    last_live_error: Exception | None = None
-                    paired_video_path: Path | None = None
-                    if video_urls:
-                        pair_dir = Path(tempfile.mkdtemp(prefix="rednote_pair_"))
-                        pairing_dirs.append(pair_dir)
-                        for video_url in video_urls:
-                            try:
-                                video_path, _ = download_video(video_url)
-                                cleanup_paths.append(video_path)
-                                # The helper rewrites files. Preserve originals for fallback.
-                                pair_image = pair_dir / f"image.{image_format}"
-                                pair_video = pair_dir / "video.mov"
-                                shutil.copyfile(path, pair_image)
-                                shutil.copyfile(video_path, pair_video)
-                                if image_format not in {"jpg", "heic"}:
-                                    pair_image = convert_live_image_to_jpeg(pair_image)
-                                    cleanup_paths.append(pair_image)
-                                prepare_live_photo(pair_image, pair_video)
-                                import_image_path = pair_image
-                                import_image_format = pair_image.suffix.lstrip(".")
-                                paired_video_path = pair_video
-                                media_kind = "live"
-                                break
-                            except SaveCancelled:
-                                raise
-                            except Exception as error:
-                                last_live_error = error
-                    if media_kind != "live":
-                        # No usable video: keep the still as a normal photo instead of
-                        # failing the item, and report it so the popup can say so.
-                        fallback_detail = f"第 {index} 张：{last_live_error or page_live_error or '没有实况视频地址'}"
+                media_host = (urllib.parse.urlsplit(url).hostname or "").lower()
+                standalone = item.get("kind") == "video" or (
+                    item.get("kind") == "gif" and (
+                        any(video_urls) or urllib.parse.urlsplit(url).path.lower().endswith(".mp4")
+                        or media_host == "video.twimg.com"))
+                paired_video_path = None
+                is_live_item = False
+                if standalone:
+                    candidates = [value for value in video_urls
+                                  if isinstance(value, str) and allowed_url(value)]
+                    if not candidates and allowed_url(url):
+                        if item.get("kind") == "video" and not urllib.parse.urlsplit(url).path.lower().endswith(
+                                (".mp4", ".mov", ".m4v", ".m3u8")):
+                            raise ValueError("没有找到视频直链，请刷新页面后重试")
+                        candidates = [url]
+                    last_error = None
+                    for candidate in candidates:
+                        try:
+                            path, image_format = download_video(candidate)
+                            used_url = candidate
+                            break
+                        except SaveCancelled:
+                            raise
+                        except Exception as error:
+                            last_error = error
+                    else:
+                        raise last_error or ValueError("没有视频地址")
+                    cleanup_paths.append(path)
+                    import_image_path = path
+                    import_image_format = image_format
+                    media_kind = "video"
+                else:
+                    path, used_url, image_format = download_image(url)
+                    cleanup_paths.append(path)
+                    import_image_path = path
+                    import_image_format = image_format
+                    media_kind = "gif" if image_format == "gif" else "image"
 
+                    if item.get("kind") == "live" and not any(video_urls):
+                        video_urls.extend(page_live_urls.get(image_identity(url), []))
+                    video_urls = list(dict.fromkeys(
+                        value for value in video_urls if isinstance(value, str) and allowed_url(value)
+                    ))
+                    is_live_item = item.get("kind") == "live" or bool(video_urls)
+                    if is_live_item:
+                        last_live_error: Exception | None = None
+                        paired_video_path: Path | None = None
+                        if video_urls:
+                            pair_dir = Path(tempfile.mkdtemp(prefix="rednote_pair_"))
+                            pairing_dirs.append(pair_dir)
+                            for video_url in video_urls:
+                                try:
+                                    video_path, _ = download_video(video_url)
+                                    cleanup_paths.append(video_path)
+                                    # The helper rewrites files. Preserve originals for fallback.
+                                    pair_image = pair_dir / f"image.{image_format}"
+                                    pair_video = pair_dir / "video.mov"
+                                    shutil.copyfile(path, pair_image)
+                                    shutil.copyfile(video_path, pair_video)
+                                    if image_format not in {"jpg", "heic"}:
+                                        pair_image = convert_live_image_to_jpeg(pair_image)
+                                        cleanup_paths.append(pair_image)
+                                    prepare_live_photo(pair_image, pair_video)
+                                    import_image_path = pair_image
+                                    import_image_format = pair_image.suffix.lstrip(".")
+                                    paired_video_path = pair_video
+                                    media_kind = "live"
+                                    break
+                                except SaveCancelled:
+                                    raise
+                                except Exception as error:
+                                    last_live_error = error
+                        if media_kind != "live":
+                            # No usable video: keep the still as a normal photo instead of
+                            # failing the item, and report it so the popup can say so.
+                            fallback_detail = f"第 {index} 张：{last_live_error or page_live_error or '没有实况视频地址'}"
                 check_cancelled()
                 resource_paths = [import_image_path]
                 if is_live_item and media_kind == "live" and paired_video_path:
@@ -606,7 +696,7 @@ def process(message: dict, on_progress=None) -> dict:
                     "format": import_image_format,
                     "sourceFormat": image_format,
                     "kind": media_kind,
-                    "quality": "page" if used_url == url and url != image_candidates(url)[0] else "candidate",
+                    "quality": "page" if not standalone and used_url == url and url != image_candidates(url)[0] else "candidate",
                 })
             except SaveCancelled:
                 break

@@ -16,13 +16,14 @@
 
 ## 这是什么
 
-一个 Chrome 扩展 + 本机连接器。在小红书网页版打开一篇图文笔记，扩展会列出页面里的图片，你勾选需要的，它们就被下载并保存到 macOS「照片」或本地文件夹。
+一个 Chrome 扩展 + 本机连接器。在小红书或 X（原 Twitter）网页版打开一篇笔记、帖子或文章，扩展会列出页面里的图片、GIF 和视频，你勾选需要的，它们就被下载并保存到 macOS「照片」或本地文件夹。
 
 它解决的是网页版小红书最麻烦的几件事：
 
 - **拿到的是缩略图，不是原图。** 连接器会剥离 CDN 的缩放、格式转换和水印后缀，回源下载原始上传文件。
 - **GIF 被转成了静态图。** 这里按文件真实内容判断格式，GIF 保持动图。
 - **实况照片存下来只剩一张封面。** 连接器会同时取回静态帧与短视频，写入相同的 Apple Content Identifier 后作为配对资源导入，「照片」里就是能按下去的实况照片。
+- **X 帖子和文章的图片、GIF 和视频。** 页面里常见的 WebP 预览会被换成同图的 JPEG 原图（X 不为 WebP 提供 `orig` 尺寸）；X 的 animated GIF 通常实际提供为无音频 MP4，扩展会保留动画并按实际格式保存；普通视频也可单独导入「照片」或导出到文件夹。网页播放器只暴露 `blob:` 地址时，或全屏图片浮层没有向普通帖子 DOM 暴露图片时，扩展会从 X 的公开 syndication 数据里取回原图或直接 MP4。只有直接 MP4 视频可保存，HLS 流暂不支持。
 
 没有远程服务器，没有账号，没有遥测。所有处理都在你自己的 Mac 上完成。
 
@@ -36,14 +37,14 @@ Chrome 扩展不能直接写入 macOS 照片图库，所以走 Chrome 官方的 
 
 ![架构图：扩展 → Native Messaging → 本机连接器 → Photos.app](docs/architecture.png)
 
-连接器只接受来自本扩展固定 ID 的消息，只允许下载小红书及其图片 CDN 的地址。
+连接器只接受来自本扩展固定 ID 的消息，只允许下载小红书及其图片 CDN，以及 X 的 `x.com`、`twitter.com`、`pbs.twimg.com` 和 `video.twimg.com` 地址。
 
 | 组件 | 文件 | 职责 |
 | --- | --- | --- |
 | 扩展界面 | `popup.html` `popup.css` `popup.js` | 列出图片、选择目的地、触发保存 |
 | 后台任务 | `background.js` | 保持本机连接，保存任务状态和结果 |
-| 内容脚本 | `content.js` | 解析笔记页，提取图片与实况视频地址 |
-| 笔记解析 | `note-parser.js` | 共用结构化解析，只选择当前笔记 |
+| 内容脚本 | `content.js` | 解析小红书笔记和 X 帖子/文章，提取图片、GIF 与视频地址 |
+| 笔记解析 | `note-parser.js` | 共用小红书/X 结构化解析，只选择当前笔记或帖子 |
 | 本机连接器 | `native-host/host.py` | 校验地址、回源下载、嗅探格式、导入相簿或导出文件 |
 | 实况配对 | `native-host/live-photo-helper.swift` | 为静态帧与 MOV 写入同一 Content Identifier |
 | 纯快捷指令版 | `ios-shortcut/` | 不装任何东西，用 iPhone 快捷指令存图 |
@@ -86,7 +87,7 @@ Chrome 扩展不能直接写入 macOS 照片图库，所以走 Chrome 官方的 
 
 **实况照片降级：** 如果某篇笔记没有向网页提供实况视频地址，那张图会作为**静态图**正常导入，并在结果中明确提示「N 张仅保存静态图」。部分旧笔记只返回静态封面，视频部分无法恢复。
 
-单次最多导入 30 张，单张上限 80 MB。
+单次最多导入 30 张；图片单张上限 80 MB，视频上限 512 MB。
 
 ## 权限说明
 
@@ -96,9 +97,9 @@ Chrome 扩展不能直接写入 macOS 照片图库，所以走 Chrome 官方的 
 | `scripting` | 在页面主世界注入读取脚本 |
 | `nativeMessaging` | 把选中的图片 URL 交给本机连接器 |
 | `storage` | 在会话中保留勾选和任务状态；在本设备持久保存常用位置及最近 100 次成功记录 |
-| `host_permissions` | 仅限 `*.xiaohongshu.com`、`*.xhscdn.com`、`*.xhscdn.net` |
+| `host_permissions` | 仅限 `*.xiaohongshu.com`、`*.xhscdn.com`、`*.xhscdn.net`、`*.x.com`、`*.twitter.com`、`*.twimg.com` 和 X 的公开 syndication 地址 |
 
-连接器侧另有一层独立的域名白名单校验，扩展被篡改也无法让它去下载别处的文件。
+连接器侧另有一层独立的域名白名单校验，扩展被篡改也无法让它去下载别处的文件。X 的 animated GIF 按 X 提供的 MP4 格式下载；支持直接 MP4 视频，暂不支持 HLS 流。
 
 ## 常见问题
 
@@ -127,7 +128,9 @@ Chrome 扩展不能直接写入 macOS 照片图库，所以走 Chrome 官方的 
 
 ## 开发验证
 
-在项目根目录运行 `./scripts/check.command`。需要 Node.js 22+、Python 3.10+、Google Chrome、Chrome for Testing 和 Apple 命令行开发工具。该命令运行回归测试，用隔离的 Chrome for Testing 验证真正的工具栏弹窗启动和关闭后重开，并在 Chrome 中覆盖 360、480、600px 高度的 18 个布局场景，检查脚本语法并编译 AppleScript，还会在临时目录执行真实连接器安装与协议检查。Swift 编译使用所选工具链的 macOS SDK。可通过 `TOOLBAR_TEST_CHROME` 指定 Chrome for Testing 的可执行文件路径。临时产物会自动清理，测试不会写入真实照片图库。
+在项目根目录运行 `./scripts/check.command`。需要 Node.js 22+、Python 3.10+、Google Chrome、可加载 unpacked extension 的独立 Chrome（默认 Chrome for Testing）和 Apple 命令行开发工具。该命令运行回归测试，用独立 Chrome 验证真正的工具栏弹窗启动和关闭后重开，并在 Chrome 中覆盖 360、480、600px 高度的 18 个布局场景，检查脚本语法并编译 AppleScript，还会在临时目录执行真实连接器安装与协议检查。Swift 编译使用所选工具链的 macOS SDK。可通过 `TOOLBAR_TEST_CHROME` 指定 Chrome 可执行文件路径。临时产物会自动清理，测试不会写入真实照片图库。
+
+可额外运行 `python3 -B scripts/check_ego_browser.py`，用 ego-browser 打开真实 X 页面并检查帖子媒体 DOM、X 图片原图 URL 归一化和白名单。通过 `EGO_X_TEST_URL` 指定一个公开的 X `/status/` 地址；默认检查 X 首页。该检查不加载本地扩展、不验证工具栏弹窗、Native Messaging 或实际保存；未看到媒体时会报告 skipped。
 
 GitHub Actions 在每次向 `main` 推送和创建 PR 时，在 macOS 上运行相同检查，并验证最低支持的 Python 3.10。
 
@@ -154,13 +157,14 @@ Preview, tick the ones you want, import. iCloud Photos then syncs them to your i
 
 ## What it is
 
-A Chrome extension plus a local native-messaging host. Open a Xiaohongshu post in the web player, and the extension lists the images on the page. Tick what you want and they are downloaded into macOS Photos or a local folder.
+A Chrome extension plus a local native-messaging host. Open a Xiaohongshu note or an X (formerly Twitter) post or article, and the extension lists the images, GIFs, and videos on the page. Tick what you want and they are downloaded into macOS Photos or a local folder.
 
 It fixes the three things that make the web player annoying:
 
 - **You get thumbnails, not originals.** The host strips the CDN's resize, format-conversion, and watermark suffixes, then fetches the original uploaded file.
 - **GIFs arrive as stills.** File format is decided by sniffing the actual bytes, so GIFs stay animated.
 - **Live Photos lose their motion.** The host downloads both the still frame and the short video, stamps them with the same Apple Content Identifier, and imports them as a paired asset — a real, pressable Live Photo in your library.
+- **X posts and articles can contain photos, GIFs, and videos.** WebP previews in the page are swapped for the JPEG original, since X does not serve an `orig` rendition in WebP. X animated GIFs are usually delivered as silent MP4 loops, so the extension keeps the animation and saves the actual format. Standalone videos can also be imported into Photos or exported to a folder. When the web player only exposes a `blob:` source, or a full-screen photo layer keeps the image outside the regular post DOM, the extension resolves the original photo or direct MP4 from X's public syndication data. Direct MP4 videos are supported; HLS streams are not.
 
 No remote server, no account, no telemetry. Everything runs on your own Mac.
 
@@ -174,14 +178,14 @@ Extension popup → Background task → Native Messaging → Local connector →
 
 ![Architecture: extension → Native Messaging → local connector → Photos.app](docs/architecture.png)
 
-The connector only accepts messages from this extension's fixed ID, and only downloads from Xiaohongshu and its image CDNs.
+The connector only accepts messages from this extension's fixed ID, and only downloads from Xiaohongshu and its image CDNs, plus X's `x.com`, `twitter.com`, `pbs.twimg.com`, and `video.twimg.com` hosts.
 
 | Component | Files | Role |
 | --- | --- | --- |
 | Extension UI | `popup.html` `popup.css` `popup.js` | Lists images, selects a destination, starts saving |
 | Background task | `background.js` | Keeps the native connection alive and stores task state and results |
-| Content script | `content.js` | Parses the post page, extracts image and Live Photo video URLs |
-| Note parser | `note-parser.js` | Shared structured parsing restricted to the current note |
+| Content script | `content.js` | Parses Xiaohongshu posts and X tweets/articles, extracting image, GIF, and video URLs |
+| Note parser | `note-parser.js` | Shared structured parsing restricted to the current post or tweet |
 | Native host | `native-host/host.py` | Validates URLs, downloads originals, sniffs formats, imports to albums or exports files |
 | Live Photo pairing | `native-host/live-photo-helper.swift` | Writes one shared Content Identifier into the still and the MOV |
 | Shortcuts-only build | `ios-shortcut/` | Save images from an iPhone Shortcut with nothing installed |
@@ -224,7 +228,7 @@ You will be told how many succeeded. If one fails, the message names which one a
 
 **Live Photo fallback:** if a post never exposes its Live Photo video URL to the page, the still is imported normally as a static photo and the result explicitly says "N saved as still only". Some older posts only serve a static cover, and the missing video cannot be recovered.
 
-Up to 30 images per import, 80 MB per image.
+Up to 30 media items per import; images are limited to 80 MB and videos to 512 MB.
 
 ## Permissions
 
@@ -234,9 +238,9 @@ Up to 30 images per import, 80 MB per image.
 | `scripting` | Inject the read script into the page's main world |
 | `nativeMessaging` | Hand the selected image URLs to the local connector |
 | `storage` | Retain selections and tasks for the session; store destination preferences and the latest 100 successful records locally |
-| `host_permissions` | Limited to `*.xiaohongshu.com`, `*.xhscdn.com`, `*.xhscdn.net` |
+| `host_permissions` | Limited to `*.xiaohongshu.com`, `*.xhscdn.com`, `*.xhscdn.net`, `*.x.com`, `*.twitter.com`, `*.twimg.com`, and the X syndication endpoint |
 
-The host enforces its own independent hostname allowlist, so even a tampered extension cannot make it fetch files from anywhere else.
+The host enforces its own independent hostname allowlist, so even a tampered extension cannot make it fetch files from anywhere else. X animated GIFs are downloaded in the MP4 format provided by X; direct MP4 videos are supported, while HLS streams are not.
 
 ## Troubleshooting
 
@@ -265,7 +269,9 @@ See [ios-shortcut/README.md](ios-shortcut/README.md) for setup.
 
 ## Development checks
 
-Run `./scripts/check.command` from the project root. Requires Node.js 22+, Python 3.10+, Google Chrome, Chrome for Testing, and Apple Command Line Tools. It tests actual toolbar popup startup and reopening in an isolated Chrome for Testing profile, runs regression tests and 18 Chrome layout checks at 360, 480 and 600px heights, checks script syntax, compiles AppleScript, and performs a real connector installation and protocol check in a temporary directory. Swift compilation uses the selected toolchain's macOS SDK. Temporary outputs are removed automatically. Tests do not write to your photo library.
+Run `./scripts/check.command` from the project root. Requires Node.js 22+, Python 3.10+, Google Chrome, a separate Chrome that can load unpacked extensions (Chrome for Testing by default), and Apple Command Line Tools. It tests actual toolbar popup startup and reopening in an isolated Chrome profile, runs regression tests and 18 Chrome layout checks at 360, 480 and 600px heights, checks script syntax, compiles AppleScript, and performs a real connector installation and protocol check in a temporary directory. Swift compilation uses the selected toolchain's macOS SDK. Set `TOOLBAR_TEST_CHROME` to choose the Chrome executable. Temporary outputs are removed automatically. Tests do not write to your photo library.
+
+You can also run `python3 -B scripts/check_ego_browser.py` to open a real X page with ego-browser and check tweet media DOM, X original-image URL normalization, and the host allowlist. Set `EGO_X_TEST_URL` to a public X `/status/` URL; the default checks the X home page. This smoke test does not load the local extension and does not verify the toolbar popup, Native Messaging, or an actual save. It reports skipped when no media is visible.
 
 GitHub Actions runs the same checks on macOS for pushes to `main` and pull requests, using the minimum supported Python 3.10.
 
