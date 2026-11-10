@@ -29,19 +29,21 @@ function collect({ path = '/explore/current123', state, root = null, images = []
 function tweetState(media, id = '20') {
   return { props: { pageProps: { tweet: { rest_id: id, legacy: { id_str: id, full_text: 'hello world', extended_entities: { media } } } } } };
 }
-function collectTweet({ path = '/jack/status/20', scripts = [], article = null, modal = null, metas = {}, sendMessage = null }) {
+function collectTweet({ path = '/jack/status/20', scripts = [], article = null, articles = null,
+  modal = null, metas = {}, sendMessage = null }) {
   let listener;
+  const articleList = articles || (article ? [article] : []);
   const document = {
     title: 'jack on X',
     images: [],
     scripts,
     querySelector: (selector) => {
       if (selector.includes('aria-modal') || selector.includes('swipe-to-dismiss') || selector === '#layers') return modal;
-      if (selector.includes('article[data-testid=')) return article;
+      if (selector.includes('article[data-testid=')) return articleList[0] || article;
       const meta = selector.match(/^meta\[(?:property|name)="([^"]+)"\]$/);
       return meta && metas[meta[1]] ? { content: metas[meta[1]] } : null;
     },
-    querySelectorAll: () => [],
+    querySelectorAll: (selector) => selector === 'article[data-testid="tweet"]' ? articleList : [],
   };
   const runtime = { onMessage: { addListener: (handler) => { listener = handler; } } };
   if (sendMessage) runtime.sendMessage = sendMessage;
@@ -66,6 +68,25 @@ function domImage() {
     getBoundingClientRect: () => ({ width: 800, height: 1000 }),
     alt: '', className: 'note-image', closest: () => null,
   };
+}
+
+function tweetArticle(statusId, text, videos) {
+  return {
+    querySelector: (selector) => {
+      if (selector === '[data-testid="tweetText"]') return { textContent: text };
+      if (selector === 'time') return { closest: () => ({ href: `https://x.com/user/status/${statusId}` }) };
+      return null;
+    },
+    querySelectorAll: (selector) => {
+      if (selector === 'video') return videos;
+      if (selector === 'a[href*="/status/"]') return [{ href: `https://x.com/user/status/${statusId}` }];
+      return [];
+    },
+  };
+}
+
+function domVideo(url, poster) {
+  return { poster, currentSrc: url, src: url, querySelectorAll: () => [] };
 }
 
 test('only the current note is collected and malformed image fields are skipped', () => {
@@ -215,12 +236,17 @@ test('an X profile page is not treated as a status or article page', async () =>
 test('X pages without embedded state fall back to the visible tweet media', async () => {
   const video = { poster: 'https://pbs.twimg.com/tweet_video_thumb/ddd?format=jpg', currentSrc: '', src: '',
     querySelectorAll: (selector) => selector === 'source' ? [{ src: 'https://video.twimg.com/tweet_video/ddd.mp4' }] : [] };
-  const article = { querySelectorAll: (selector) => {
-    if (selector.includes('pbs.twimg.com/media/')) {
-      return [{ src: 'https://pbs.twimg.com/media/eee?format=jpg&name=small', currentSrc: '', naturalWidth: 1200, naturalHeight: 900 }];
-    }
-    return selector === 'video' ? [video] : [];
-  } };
+  const article = {
+    querySelector: (selector) => selector === 'time'
+      ? { closest: () => ({ href: 'https://x.com/jack/status/20' }) }
+      : null,
+    querySelectorAll: (selector) => {
+      if (selector.includes('pbs.twimg.com/media/')) {
+        return [{ src: 'https://pbs.twimg.com/media/eee?format=jpg&name=small', currentSrc: '', naturalWidth: 1200, naturalHeight: 900 }];
+      }
+      return selector === 'video' ? [video] : [];
+    },
+  };
   const result = await collectTweet({ article });
   assert.deepEqual(result.images.map((item) => item.kind), ['image', 'gif']);
   assert.equal(result.images[0].url, 'https://pbs.twimg.com/media/eee?format=jpg&name=orig');
@@ -270,7 +296,12 @@ test('X blob videos use the public syndication MP4s', async () => {
   const poster = 'https://pbs.twimg.com/amplify_video_thumb/2119380594979487744/img/G4rmMA0WpNBOzFuU.jpg';
   const video = { poster, currentSrc: 'blob:https://x.com/abc', src: 'blob:https://x.com/abc',
     querySelectorAll: () => [] };
-  const article = { querySelectorAll: (selector) => selector === 'video' ? [video] : [] };
+  const article = {
+    querySelector: (selector) => selector === 'time'
+      ? { closest: () => ({ href: 'https://x.com/mintchocccs/status/2119380630018613658' }) }
+      : null,
+    querySelectorAll: (selector) => selector === 'video' ? [video] : [],
+  };
   const result = await collectTweet({
     path: '/mintchocccs/status/2119380630018613658', article,
     sendMessage: (message, callback) => {
@@ -291,6 +322,27 @@ test('X blob videos use the public syndication MP4s', async () => {
   assert.equal(result.images[0].videoUrl,
     'https://video.twimg.com/amplify_video/2119380594979487744/vid/avc1/1024x576/hi.mp4');
   assert.equal(result.images[0].videoUrls.length, 2);
+});
+
+test('a reply status page collects the reply instead of the parent tweet', async () => {
+  const parent = tweetArticle('2120049469857423429', 'parent post', [
+    domVideo('https://video.twimg.com/amplify_video/1/vid/720x840/parent.mp4',
+      'https://pbs.twimg.com/amplify_video_thumb/1/img/parent.jpg'),
+    domVideo('https://video.twimg.com/amplify_video/2/vid/584x962/parent.mp4',
+      'https://pbs.twimg.com/amplify_video_thumb/2/img/parent.jpg'),
+  ]);
+  const reply = tweetArticle('2120055026366472468', 'reply gif', [
+    domVideo('https://video.twimg.com/tweet_video/reply.mp4',
+      'https://pbs.twimg.com/tweet_video_thumb/reply.jpg'),
+  ]);
+  const result = await collectTweet({
+    path: '/talalikestars/status/2120055026366472468',
+    articles: [parent, reply],
+  });
+  assert.equal(result.noteId, '2120055026366472468');
+  assert.equal(result.title, 'reply gif');
+  assert.equal(result.images.length, 1);
+  assert.equal(result.images[0].videoUrl, 'https://video.twimg.com/tweet_video/reply.mp4');
 });
 
 test('an X page with only metadata still yields the video source', async () => {

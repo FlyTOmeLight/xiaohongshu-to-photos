@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "红薯收藏夹",
   "description": "从小红书和 X 网页选择图片、GIF、视频和实况照片，保存到 macOS“照片”相簿或本地文件夹。",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "minimum_chrome_version": "109",
   "permissions": [
     "activeTab",

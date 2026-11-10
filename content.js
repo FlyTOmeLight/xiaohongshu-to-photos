@@ -171,8 +171,24 @@
     return document.querySelector(selector)?.content?.trim() || "";
   }
 
-  function getTweetTitle() {
-    const text = document.querySelector('[data-testid="tweetText"]')?.textContent?.trim();
+  function currentTweetRoot() {
+    const statusId = RednoteParser.statusIdFromUrl(location.href);
+    const articles = [...document.querySelectorAll('article[data-testid="tweet"]')];
+    if (!statusId) return articles[0] || document;
+    const matchingTime = articles.find((article) => {
+      const time = article.querySelector?.('time');
+      return RednoteParser.statusIdFromUrl(time?.closest?.('a')?.href || "") === statusId;
+    });
+    if (matchingTime) return matchingTime;
+    const matchingLink = articles.find((article) =>
+      [...article.querySelectorAll?.('a[href*="/status/"]') || []].some((link) =>
+        RednoteParser.statusIdFromUrl(link.href || "") === statusId));
+    return matchingLink || null;
+  }
+
+  function getTweetTitle(root = null) {
+    const scope = root || currentTweetRoot();
+    const text = scope?.querySelector?.('[data-testid="tweetText"]')?.textContent?.trim();
     if (text) return text.replace(/\s+/g, " ").slice(0, 80);
     const meta = metaContent('meta[property="og:title"]');
     if (meta) {
@@ -182,11 +198,11 @@
     return document.title.replace(/\s*\/\s*X$/, "").replace(/\s+/g, " ").trim().slice(0, 80) || "X 帖子";
   }
 
-  function tweetMediaFromDom() {
+  function tweetMediaFromDom(rootOverride = null) {
     const articlePage = RednoteParser.articleIdFromUrl(location.href);
     const articleRoot = articlePage
       ? document.querySelector('[data-article-part="body"]')?.parentElement || document.querySelector('[data-article-part="body"]')
-      : document.querySelector('article[data-testid="tweet"]') || document;
+      : rootOverride || currentTweetRoot();
     const modal = document.querySelector('div[aria-modal="true"]')
       || document.querySelector('div[data-testid="swipe-to-dismiss"]')
       || document.querySelector('#layers');
@@ -332,10 +348,11 @@
     const noteId = RednoteParser.xContentIdFromUrl(location.href);
     const statusId = RednoteParser.statusIdFromUrl(location.href);
     if (!noteId) return null;
-    const title = RednoteParser.articleIdFromUrl(location.href) ? getArticleTitle() : getTweetTitle();
+    const tweetRoot = RednoteParser.articleIdFromUrl(location.href) ? null : currentTweetRoot();
+    const title = RednoteParser.articleIdFromUrl(location.href) ? getArticleTitle() : getTweetTitle(tweetRoot);
     const structured = RednoteParser.fromPage(globalThis, document, location.href, title);
     if (structured) return structured;
-    const images = tweetMediaFromDom();
+    const images = tweetMediaFromDom(tweetRoot);
     const note = { noteId, title, url: location.href, images };
     if (statusId && !images.length) {
       return resolveXVideoMedia(statusId).then((media) => {
